@@ -1,0 +1,7 @@
+.venv/
+.vscode/
+notebooks/
+.cursorignore
+__pycache__/
+.ipynb_checkpoints/
+.html
