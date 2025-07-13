@@ -182,7 +182,7 @@ class SimpleSupportResistance(BaseIndicator):
     and extends them as support/resistance levels until broken.
     """
     
-    def __init__(self, lookback=20, high_col='High', low_col='Low', name="SimpleSR"):
+    def __init__(self, lookback=20, high_col='High', low_col='Low'):
         """
         Initialize the Support/Resistance indicator.
         
@@ -192,22 +192,21 @@ class SimpleSupportResistance(BaseIndicator):
             low_col (str): Column name to use for pivot lows calculation
             name (str): Indicator name
         """
-        super().__init__(name=name)
         self.lookback = lookback
         self.high_col = high_col
         self.low_col = low_col
+        super().__init__()
 
-    def get_column_names(self, **kwargs):
+    def get_column_names(self):
         """Return column names produced by this indicator."""
-        lookback = kwargs.get('lookback', self.lookback)
         return [
-            f'SimpleSR_{lookback}_Pivot_High',
-            f'SimpleSR_{lookback}_Pivot_Low', 
-            f'SimpleSR_{lookback}_Resistance',
-            f'SimpleSR_{lookback}_Support'
+            f'SimpleSR_{self.lookback}_Pivot_High',
+            f'SimpleSR_{self.lookback}_Pivot_Low', 
+            f'SimpleSR_{self.lookback}_Resistance',
+            f'SimpleSR_{self.lookback}_Support'
         ]
     
-    def calculate(self, data, append=True, **kwargs):
+    def _calculate_for_single_df(self, data, append=True, **kwargs):
         """
         Calculate pivot points and support/resistance levels.
         
@@ -236,7 +235,7 @@ class SimpleSupportResistance(BaseIndicator):
         df['Support'] = self._extend_pivot_low_line(df)
         
         # Store calculated values
-        self.values = {
+        indicator_data = {
             f'SimpleSR_{lookback}_Pivot_High': df['PH'],
             f'SimpleSR_{lookback}_Pivot_Low': df['PL'],
             f'SimpleSR_{lookback}_Resistance': df['Resistance'],
@@ -244,14 +243,7 @@ class SimpleSupportResistance(BaseIndicator):
         }
         self.is_calculated = True
         
-        # Return results according to the append parameter
-        if append:
-            result = data.copy()
-            for key, values in self.values.items():
-                result[key] = values
-            return result
-        else:
-            return pd.DataFrame(self.values, index=data.index)
+        return self._append_to_df(data, indicator_data) if append else self._create_indicator_df(data, indicator_data)
     
     def _find_pivot_highs(self, df, lookback, high_col='High'):
         """

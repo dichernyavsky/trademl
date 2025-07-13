@@ -1,1 +1,1 @@
-from .simple_sr_strategy import SimpleSREventStrategy
+from .simple_sr_strategy import SimpleSREventStrategy as SimpleSRStrategy

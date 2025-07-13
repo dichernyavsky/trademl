@@ -9,7 +9,7 @@ from .base_indicator import BaseIndicator
 from .support_resistance import ClusterSupportResistance, SimpleSupportResistance
 from .volume_profile import VolumeProfileSupportResistance
 from .multi_timeframe_sr import MultiTimeframeSR
-from .volatility import BollingerBands, ATR, VolatilityRatio
+from .volatility import BollingerBands
 from .volume import VolumeMA
 
 __all__ = [
@@ -18,7 +18,5 @@ __all__ = [
     'VolumeProfileSupportResistance',
     'MultiTimeframeSR',
     'BollingerBands',
-    'ATR',
-    'VolatilityRatio',
     'VolumeMA'
 ] 

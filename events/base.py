@@ -77,7 +77,9 @@ class EventGenerator(ABC):
         indicator : BaseIndicator
             Technical indicator to add
         """
-        self.indicators[indicator.name] = indicator
+        # Use class name as the key instead of indicator.name
+        indicator_name = indicator.__class__.__name__
+        self.indicators[indicator_name] = indicator
     
     def get_indicator(self, name):
         """

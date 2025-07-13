@@ -72,7 +72,14 @@ def ptsl_simple(events, close, window=20, multiplier=[2, 2], min_ret=0.001):
     sl_target = np.maximum(multiplier[1] * event_vol, min_ret)
     
     # Calculate barriers relative to entry price
-    entry_prices = close[events.index]
+    # Use entry_price from events if available, otherwise use close price at event times
+    if 'entry_price' in events.columns:
+        entry_prices = events['entry_price']
+        print(f"Using entry_price from events for barrier calculation")
+    else:
+        entry_prices = close[events.index]
+        print(f"Using close price at event times for barrier calculation")
+    
     events['target'] = pt_target  # Keep original target column with PT target
     events['pt'] = entry_prices * (1 + pt_target)
     events['sl'] = entry_prices * (1 - sl_target)

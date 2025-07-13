@@ -89,6 +89,8 @@ def plot_market_data(
     df: pd.DataFrame,
     indicators: List[Indicator] = None,
     events: pd.DataFrame = None,
+    signals: pd.DataFrame = None,
+    signals_config: Dict[str, Dict[str, str]] = None,
     filename: str = '',
     plot_width: int = None,
     plot_volume: bool = True,
@@ -106,6 +108,18 @@ def plot_market_data(
         List of Indicator objects to plot.
     events : pd.DataFrame
         DataFrame of events with index as timestamps and columns that may include 'direction' and 'entry_price'.
+    signals : pd.DataFrame
+        DataFrame of signals with index as timestamps and columns containing signal values (0, 1, -1).
+        Each column will be plotted as a separate signal type.
+    signals_config : Dict[str, Dict[str, str]]
+        Configuration for signals plotting. Format:
+        {
+            'signal_column_name': {
+                'values_col': 'column_with_0_1_-1_values',
+                'price_col': 'column_with_price_values'  # Optional, defaults to 'Close'
+            }
+        }
+        If None, uses default behavior (all columns as signals, Close price for Y position).
     filename : str
         If specified, the plot is saved to this file.
     plot_width : int
@@ -264,6 +278,129 @@ def plot_market_data(
                          line_color="black", fill_color=inc_cmap, legend_label='OHLC')
         return r
     
+    # Plot barriers (Take Profit and Stop Loss)
+    def _plot_barriers():
+        if events is None or events.empty:
+            return None
+            
+        # Get the original datetime index if it exists
+        original_datetime_index = None
+        if 'datetime' in df.columns:
+            original_datetime_index = df['datetime']
+        
+        # Collect barrier data
+        barrier_times = []
+        barrier_prices = []
+        barrier_types = []
+        barrier_tooltips = []
+        
+        for event_time in events.index:
+            event_row = events.loc[event_time]
+            
+            # Find corresponding index in main dataframe
+            idx = None
+            
+            # Method 1: Try to find in original datetime index if available
+            if original_datetime_index is not None:
+                try:
+                    datetime_positions = original_datetime_index[original_datetime_index == event_time]
+                    if len(datetime_positions) > 0:
+                        idx = datetime_positions.index[0]
+                except:
+                    pass
+            
+            # Method 2: Try to find in current df index (if it's still datetime)
+            if idx is None and isinstance(df.index, pd.DatetimeIndex):
+                if event_time in df.index:
+                    idx = df.index.get_loc(event_time)
+            
+            # Method 3: Try nearest match if we have datetime data
+            if idx is None and (original_datetime_index is not None or isinstance(df.index, pd.DatetimeIndex)):
+                try:
+                    if original_datetime_index is not None:
+                        nearest_idx = original_datetime_index.index[original_datetime_index.searchsorted(event_time)]
+                        idx = nearest_idx
+                    else:
+                        nearest_idx = df.index.searchsorted(event_time)
+                        if nearest_idx < len(df.index):
+                            idx = nearest_idx
+                except:
+                    pass
+            
+            # Method 4: Fallback
+            if idx is None:
+                event_position = events.index.get_loc(event_time)
+                if event_position < len(df):
+                    idx = event_position
+            
+            if idx is None:
+                continue
+            
+            # Add Take Profit barrier
+            if 'pt' in events.columns and not pd.isna(event_row.get('pt')):
+                barrier_times.append(idx)
+                barrier_prices.append(event_row['pt'])
+                barrier_types.append('TP')
+                barrier_tooltips.append(f"Take Profit: {event_row['pt']:.2f}")
+            
+            # Add Stop Loss barrier
+            if 'sl' in events.columns and not pd.isna(event_row.get('sl')):
+                barrier_times.append(idx)
+                barrier_prices.append(event_row['sl'])
+                barrier_types.append('SL')
+                barrier_tooltips.append(f"Stop Loss: {event_row['sl']:.2f}")
+        
+        if not barrier_times:
+            return None
+            
+        # Create barrier data source
+        barrier_source = ColumnDataSource({
+            'x': barrier_times,
+            'y': barrier_prices,
+            'type': barrier_types,
+            'tooltip': barrier_tooltips
+        })
+        
+        # Plot Take Profit barriers
+        tp_indices = [i for i, t in enumerate(barrier_types) if t == 'TP']
+        if tp_indices:
+            tp_source = ColumnDataSource({
+                'x': [barrier_times[i] for i in tp_indices],
+                'y': [barrier_prices[i] for i in tp_indices],
+                'tooltip': [barrier_tooltips[i] for i in tp_indices]
+            })
+            r_tp = fig_ohlc.diamond(
+                x='x', y='y', size=8, color='green', alpha=0.8,
+                line_color='darkgreen', line_width=2, source=tp_source,
+                legend_label='Take Profit'
+            )
+            fig_ohlc.add_tools(HoverTool(
+                renderers=[r_tp],
+                tooltips=[('Take Profit', '@tooltip')],
+                point_policy='follow_mouse',
+                mode='mouse'
+            ))
+        
+        # Plot Stop Loss barriers
+        sl_indices = [i for i, t in enumerate(barrier_types) if t == 'SL']
+        if sl_indices:
+            sl_source = ColumnDataSource({
+                'x': [barrier_times[i] for i in sl_indices],
+                'y': [barrier_prices[i] for i in sl_indices],
+                'tooltip': [barrier_tooltips[i] for i in sl_indices]
+            })
+            r_sl = fig_ohlc.diamond(
+                x='x', y='y', size=8, color='red', alpha=0.8,
+                line_color='darkred', line_width=2, source=sl_source,
+                legend_label='Stop Loss'
+            )
+            fig_ohlc.add_tools(HoverTool(
+                renderers=[r_sl],
+                tooltips=[('Stop Loss', '@tooltip')],
+                point_policy='follow_mouse',
+                mode='mouse'
+            ))
+    
     # Plot events
     def _plot_events():
         if events is None or events.empty:
@@ -275,17 +412,54 @@ def plot_market_data(
         event_directions = []
         event_tooltips = []
         
+        # Get the original datetime index if it exists
+        original_datetime_index = None
+        if 'datetime' in df.columns:
+            original_datetime_index = df['datetime']
+        
         for event_time in events.index:
-            # Find the corresponding index in the main dataframe
-            if event_time in df.index:
-                idx = df.index.get_loc(event_time)
-            elif is_datetime_index and isinstance(event_time, pd.Timestamp):
-                # Find nearest timestamp if exact match not found
+            # Try to find the corresponding index in the main dataframe
+            idx = None
+            
+            # Method 1: Try to find in original datetime index if available
+            if original_datetime_index is not None:
                 try:
-                    idx = df.index.get_indexer([event_time], method='nearest')[0]
+                    # Find the position in the original datetime series
+                    datetime_positions = original_datetime_index[original_datetime_index == event_time]
+                    if len(datetime_positions) > 0:
+                        # Get the position in the current df
+                        idx = datetime_positions.index[0]
                 except:
-                    continue
-            else:
+                    pass
+            
+            # Method 2: Try to find in current df index (if it's still datetime)
+            if idx is None and isinstance(df.index, pd.DatetimeIndex):
+                if event_time in df.index:
+                    idx = df.index.get_loc(event_time)
+            
+            # Method 3: Try nearest match if we have datetime data
+            if idx is None and (original_datetime_index is not None or isinstance(df.index, pd.DatetimeIndex)):
+                try:
+                    if original_datetime_index is not None:
+                        # Find nearest in original datetime
+                        nearest_idx = original_datetime_index.index[original_datetime_index.searchsorted(event_time)]
+                        idx = nearest_idx
+                    else:
+                        # Find nearest in current df index
+                        nearest_idx = df.index.searchsorted(event_time)
+                        if nearest_idx < len(df.index):
+                            idx = nearest_idx
+                except:
+                    pass
+            
+            # Method 4: If all else fails, try to find by position in events
+            if idx is None:
+                # This is a fallback - try to map event position to df position
+                event_position = events.index.get_loc(event_time)
+                if event_position < len(df):
+                    idx = event_position
+            
+            if idx is None:
                 continue
                 
             event_indices.append(idx)
@@ -390,6 +564,174 @@ def plot_market_data(
                 mode='mouse'
             ))
     
+    # Plot signals
+    def _plot_signals():
+        if signals is None or signals.empty:
+            return None
+            
+        # Get the original datetime index if it exists
+        original_datetime_index = None
+        if 'datetime' in df.columns:
+            original_datetime_index = df['datetime']
+        
+        # Determine which columns to process
+        if signals_config is not None:
+            # Use configuration to determine which columns to plot
+            columns_to_process = signals_config.keys()
+        else:
+            # Default behavior: process all columns
+            columns_to_process = signals.columns
+        
+        # Process each signal column
+        for signal_col in columns_to_process:
+            if signals_config is not None:
+                # Use configuration
+                config = signals_config[signal_col]
+                values_col = config['values_col']
+                price_col = config.get('price_col', 'Close')
+                
+                if values_col not in signals.columns:
+                    print(f"Warning: values column '{values_col}' not found in signals DataFrame")
+                    continue
+                    
+                signal_series = signals[values_col]
+                
+                # Get price values
+                if price_col == 'Close':
+                    # Use Close price from main dataframe
+                    price_series = None
+                elif price_col in signals.columns:
+                    # Use price from signals DataFrame
+                    price_series = signals[price_col]
+                else:
+                    print(f"Warning: price column '{price_col}' not found, using Close price")
+                    price_series = None
+            else:
+                # Default behavior
+                signal_series = signals[signal_col]
+                price_series = None
+                price_col = 'Close'
+            
+            # Find indices where signal is not 0
+            non_zero_signals = signal_series[signal_series != 0]
+            
+            if len(non_zero_signals) == 0:
+                continue
+                
+            signal_indices = []
+            signal_y_values = []
+            signal_values = []
+            signal_tooltips = []
+            
+            for signal_time in non_zero_signals.index:
+                # Try to find the corresponding index in the main dataframe
+                idx = None
+                
+                # Method 1: Try to find in original datetime index if available
+                if original_datetime_index is not None:
+                    try:
+                        datetime_positions = original_datetime_index[original_datetime_index == signal_time]
+                        if len(datetime_positions) > 0:
+                            idx = datetime_positions.index[0]
+                    except:
+                        pass
+                
+                # Method 2: Try to find in current df index (if it's still datetime)
+                if idx is None and isinstance(df.index, pd.DatetimeIndex):
+                    if signal_time in df.index:
+                        idx = df.index.get_loc(signal_time)
+                
+                # Method 3: Try nearest match if we have datetime data
+                if idx is None and (original_datetime_index is not None or isinstance(df.index, pd.DatetimeIndex)):
+                    try:
+                        if original_datetime_index is not None:
+                            nearest_idx = original_datetime_index.index[original_datetime_index.searchsorted(signal_time)]
+                            idx = nearest_idx
+                        else:
+                            nearest_idx = df.index.searchsorted(signal_time)
+                            if nearest_idx < len(df.index):
+                                idx = nearest_idx
+                    except:
+                        pass
+                
+                # Method 4: If all else fails, try to find by position
+                if idx is None:
+                    signal_position = signal_series.index.get_loc(signal_time)
+                    if signal_position < len(df):
+                        idx = signal_position
+                
+                if idx is None:
+                    continue
+                    
+                signal_indices.append(idx)
+                
+                # Determine Y position
+                if price_series is not None and signal_time in price_series.index:
+                    y_value = price_series[signal_time]
+                else:
+                    y_value = df.iloc[idx]['Close']
+                    
+                signal_y_values.append(y_value)
+                signal_values.append(int(non_zero_signals[signal_time]))
+                
+                # Create tooltip
+                if signals_config is not None:
+                    tooltip = f"{signal_col}: {non_zero_signals[signal_time]} (price: {y_value:.4f})"
+                else:
+                    tooltip = f"{signal_col}: {non_zero_signals[signal_time]}"
+                signal_tooltips.append(tooltip)
+            
+            if not signal_indices:
+                continue
+                
+            # Create signal data source
+            signal_source = ColumnDataSource({
+                'x': signal_indices,
+                'y': signal_y_values,
+                'signal': signal_values,
+                'tooltip': signal_tooltips
+            })
+            
+            # Plot positive signals (signal = 1)
+            pos_indices = [i for i, s in enumerate(signal_values) if s == 1]
+            if pos_indices:
+                pos_source = ColumnDataSource({
+                    'x': [signal_indices[i] for i in pos_indices],
+                    'y': [signal_y_values[i] for i in pos_indices],
+                    'tooltip': [signal_tooltips[i] for i in pos_indices]
+                })
+                r_pos = fig_ohlc.diamond(
+                    x='x', y='y', size=10, color='green', alpha=0.8,
+                    line_color='black', line_width=1, source=pos_source,
+                    legend_label=f'{signal_col} (Positive)'
+                )
+                fig_ohlc.add_tools(HoverTool(
+                    renderers=[r_pos],
+                    tooltips=[(f'{signal_col} (Positive)', '@tooltip')],
+                    point_policy='follow_mouse',
+                    mode='mouse'
+                ))
+            
+            # Plot negative signals (signal = -1)
+            neg_indices = [i for i, s in enumerate(signal_values) if s == -1]
+            if neg_indices:
+                neg_source = ColumnDataSource({
+                    'x': [signal_indices[i] for i in neg_indices],
+                    'y': [signal_y_values[i] for i in neg_indices],
+                    'tooltip': [signal_tooltips[i] for i in neg_indices]
+                })
+                r_neg = fig_ohlc.diamond(
+                    x='x', y='y', size=10, color='red', alpha=0.8,
+                    line_color='black', line_width=1, source=neg_source,
+                    legend_label=f'{signal_col} (Negative)'
+                )
+                fig_ohlc.add_tools(HoverTool(
+                    renderers=[r_neg],
+                    tooltips=[(f'{signal_col} (Negative)', '@tooltip')],
+                    point_policy='follow_mouse',
+                    mode='mouse'
+                ))
+    
     # Plot indicators
     def _plot_indicators():
         class LegendStr(str):
@@ -484,6 +826,12 @@ def plot_market_data(
     
     # Plot events on the OHLC chart
     _plot_events()
+
+    # Plot signals on the OHLC chart
+    _plot_signals()
+
+    # Plot barriers on the OHLC chart
+    _plot_barriers()
     
     indicator_figs = _plot_indicators()
     figs_below_ohlc.extend(indicator_figs)

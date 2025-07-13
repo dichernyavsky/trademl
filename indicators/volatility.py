@@ -11,7 +11,7 @@ class BollingerBands(BaseIndicator):
     and volatility.
     """
     
-    def __init__(self, window=20, num_std=2.0, column='Close', name="Bollinger_Bands"):
+    def __init__(self, window=20, num_std=2.0, column='Close'):
         """
         Initialize the Bollinger Bands indicator.
         
@@ -21,12 +21,21 @@ class BollingerBands(BaseIndicator):
             column (str): Column to use for calculations
             name (str): Name of this indicator instance
         """
-        super().__init__(name=name)
         self.window = window
         self.num_std = num_std
         self.column = column
+
+        super().__init__()
     
-    def calculate(self, data, append=True, **kwargs):
+    def get_column_names(self):
+        """Return column names produced by this indicator."""
+        return [
+            f'BollingerBands_{self.column}_{self.window}_std_{self.num_std}_Middle',
+            f'BollingerBands_{self.column}_{self.window}_std_{self.num_std}_Upper',
+            f'BollingerBands_{self.column}_{self.window}_std_{self.num_std}_Lower'
+        ]
+    
+    def _calculate_for_single_df(self, data, append=True, **kwargs):
         """
         Calculate Bollinger Bands.
         
@@ -53,25 +62,19 @@ class BollingerBands(BaseIndicator):
         lower_band = middle_band - (std_dev * self.num_std)
         
         # Store the calculated values
-        self.values = {
-            f'{self.name}_Middle': middle_band,
-            f'{self.name}_Upper': upper_band,
-            f'{self.name}_Lower': lower_band,
-            f'{self.name}_Width': (upper_band - lower_band) / middle_band  # Normalized width
+        indicator_data = {
+            f'{self.column_names[0]}': middle_band,
+            f'{self.column_names[1]}': upper_band,
+            f'{self.column_names[2]}': lower_band,
+            #f'{self.column_names[3]}': (upper_band - lower_band) / middle_band  # Normalized width
         }
         
         self.is_calculated = True
         
         # Return results according to the append parameter
-        if append:
-            result = data.copy()
-            for key, values in self.values.items():
-                result[key] = values
-            return result
-        else:
-            return pd.DataFrame(self.values, index=data.index)
+        return self._append_to_df(data, indicator_data) if append else self._create_indicator_df(data, indicator_data)
     
-
+'''
 
 class ATR(BaseIndicator):
     """
@@ -81,7 +84,7 @@ class ATR(BaseIndicator):
     of an asset for a given period.
     """
     
-    def __init__(self, window=14, name="ATR"):
+    def __init__(self, window=14):
         """
         Initialize the ATR indicator.
         
@@ -89,10 +92,16 @@ class ATR(BaseIndicator):
             window (int): Window size for the average calculation
             name (str): Name of this indicator instance
         """
-        super().__init__(name=name)
+        super().__init__()
         self.window = window
     
-    def calculate(self, data, append=True, **kwargs):
+    def get_column_names(self):
+        """Return column names produced by this indicator."""
+        return [
+            f'ATR_{self.window}'
+        ]
+    
+    def _calculate_for_single_df(self, data, append=True, **kwargs):
         """
         Calculate the Average True Range.
         
@@ -214,4 +223,4 @@ class VolatilityRatio(BaseIndicator):
         else:
             return pd.DataFrame(self.values, index=data.index)
     
-    
+'''

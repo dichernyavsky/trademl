@@ -11,6 +11,76 @@ The framework is built around **de Prado's event-based labeling methodology**:
 3. **Trades**: Generate labeled training samples from barrier-bounded events
 4. **ML Training**: Use Trades as a dataset for ML training
 
+## Quick Start Example
+
+```python
+from data_process import DataLoader
+from indicators import SimpleSupportResistance
+from strategies import SimpleSRStrategy
+from plotting import plot_market_data, Indicator
+import pandas as pd
+
+# Load data with simplified structure {symbol: DataFrame}
+dfs = DataLoader.load_crypto_data_single_timeframe(
+    symbols=["BTCUSDT", "ETHUSDT", "ADAUSDT", "AVAXUSDT", "DOGEUSDT", "LINKUSDT"],
+    timeframe="1h",
+    start_date="2017-12-01",
+    end_date="2025-12-01",
+    data_root="./data/crypto"
+)
+
+# Add indicators
+indicators = [SimpleSupportResistance(lookback=20)]
+for indicator in indicators:
+    dfs = indicator.calculate(dfs, append=True)
+
+# Generate events and trades
+strategy = SimpleSRStrategy(params={
+    'lookback': 20,
+    'hold_periods': 100,
+    'barrier_method': 'simple',
+    'window': 40,
+    'multiplier': [4, 4],
+    'min_ret': 0.001
+})
+
+events = strategy.generate_events(dfs, set_barriers=True)
+trades = strategy.generate_trades(dfs)
+
+# Visualize with signals
+symbol = "BTCUSDT"
+df = dfs[symbol]
+
+# Create signals DataFrame
+signals_df = pd.DataFrame({
+    'signal_values': trades[symbol].direction * trades[symbol].bin,
+    'entry_price': events[symbol]['entry_price']
+}, index=trades[symbol].index)
+
+# Configure signals plotting
+signals_config = {
+    'prediction_quality': {
+        'values_col': 'signal_values',    # Column with 0, 1, -1 values
+        'price_col': 'entry_price'        # Column with price values
+    }
+}
+
+# Create interactive plot
+plot_market_data(
+    df=df,
+    indicators=[
+        Indicator(df.SimpleSR_20_Resistance.values, name='SSR_20_Resistance', overlay=True, color='blue'),
+        Indicator(df.SimpleSR_20_Support.values, name='SSR_20_Support', overlay=True, color='blue'),
+        Indicator(df['Close'].pct_change().values, name='Returns', overlay=False)
+    ],
+    events=events[symbol],
+    signals=signals_df,
+    signals_config=signals_config,
+    plot_width=1200,
+    plot_volume=True,
+    show_legend=True
+)
+```
 
 ## Central Architecture
 
@@ -20,7 +90,7 @@ Events are the central concept here - they represent moments in time when someth
 
 ```python
 # Events can be generated from various sources:
-from trademl.events import StatisticalEvents, IndicatorEvents
+from events import StatisticalEvents, IndicatorEvents
 
 # Statistical approach (e.g., CUSUM filters)
 cusum_events = StatisticalEvents(threshold=0.05)
@@ -65,6 +135,30 @@ trades = generate_trades(price_data, events)
 # Result: DataFrame with features and labels ready for ML training
 ```
 
+### 📊 Advanced Visualization with Signals
+
+The framework supports plotting arbitrary signal columns alongside events and indicators:
+
+```python
+from plotting import plot_market_data
+
+# Create signals DataFrame with values 0, 1, -1
+signals_df = pd.DataFrame({
+    'direction_bin': events['direction'] * trades['bin'],  # Direction * outcome
+    'custom_signal': custom_signal_values,
+    'price_signal': price_based_signals
+}, index=events.index)
+
+# Plot with signals
+plot_market_data(
+    df=price_data,
+    events=events,
+    signals=signals_df,  # New parameter for arbitrary signals
+    indicators=indicators
+)
+# Result: Interactive plot with green diamonds (positive), red diamonds (negative)
+```
+
 ## Workflow
 
 ### 1. Event Identification
@@ -95,7 +189,7 @@ Use generated trades for machine learning:
 
 ### Event Generators
 ```python
-from trademl.events.base import EventGenerator, EventType
+from events.base import EventGenerator, EventType
 
 class CustomEventGenerator(EventGenerator):
     def generate(self, data, **kwargs):
@@ -106,7 +200,7 @@ class CustomEventGenerator(EventGenerator):
 
 ### Strategy Framework  
 ```python
-from trademl.strategies.base_strategy import BaseStrategy
+from strategies.base_strategy import BaseStrategy
 
 class MLStrategy(BaseStrategy):
     def _generate_raw_events(self, data):
@@ -145,16 +239,68 @@ The framework currently implements:
 - ✅ Event generation system
 - ✅ Trade generation pipeline
 - ✅ Basic indicator integration
+- ✅ Crypto data loader (Binance API)
+- ✅ Parquet data storage and loading
+- ✅ Advanced visualization with signals plotting
+- ✅ Interactive Bokeh-based plotting
 - 🚧 ML model integration (planned)
 - 🚧 Generalized barrier method
 - 🚧 Advanced event generators (expanding)
 - 🚧 Performance analytics (planned)
 
-## Quick Example
+## Quick Setup
+
+### Prerequisites
+- Anaconda or Miniconda installed
+- Git
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd trademl
+   ```
+
+2. **Create conda environment:**
+   ```bash
+   conda env create -f environment.yml
+   ```
+
+3. **Activate environment:**
+   ```bash
+   conda activate trademl
+   ```
+
+4. **Install additional dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### Data Setup
+
+1. **Download cryptocurrency data:**
+   ```bash
+   python data_process/download_full_history.py --count 10 --intervals 1h
+   ```
+
+2. **Or use the data loader in Python:**
+   ```python
+   from data_process import DataLoader
+   
+   # Load data for multiple symbols
+   data = DataLoader.load_crypto_data_single_timeframe(
+       symbols=["BTCUSDT", "ETHUSDT"],
+       timeframe="1h",
+       data_root="data/crypto"
+   )
+   ```
+
+## Advanced Example
 
 ```python
-from trademl.strategies.base_strategy import BaseStrategy
-from trademl.events.statistical import CUSUMEvents
+from strategies.base_strategy import BaseStrategy
+from events.statistical import CUSUMEvents
 
 # Create CUSUM-based event generator
 cusum_events = CUSUMEvents(threshold=0.02)
@@ -182,7 +328,16 @@ trades = strategy.generate_trades(price_data)
 - **Backtesting Engine**: Comprehensive strategy evaluation tools
 - **Risk Management**: Position sizing and portfolio-level risk controls
 
-## References
+## Documentation
 
-This framework implements concepts from:
-- López de Prado, M. (2018). *Advances in Financial Machine Learning*.
+- **Data Processing**: See `data_process/README.md` for detailed data loading examples
+- **Usage Examples**: See `data_process/USAGE_EXAMPLES.md` for comprehensive usage scenarios
+- **Environment Setup**: See `ENVIRONMENT_SETUP.md` for detailed setup instructions
+
+## Contributing
+
+This project is under active development. Contributions are welcome!
+
+## License
+
+[Add your license here]

@@ -104,37 +104,36 @@ class SimpleSREventGenerator(EventGenerator):
         Returns:
             DataFrame with event direction and optionally breakout price
         """
-        # Calculate pivots and SR levels
-        indicators_df = self.calculate_indicators(data)
-
+        # Calculate pivots and SR levels using the indicator directly
+        sr_indicator = SimpleSupportResistance(lookback=self.lookback)
+        enriched_data = sr_indicator.calculate(data, append=True)
 
         # Define column names for pivots and SR
         res_col = f"SimpleSR_{self.lookback}_Resistance"
         sup_col = f"SimpleSR_{self.lookback}_Support"
 
-        # Combine data with indicators
-        df = data.copy()
-        for col in [res_col, sup_col]:
-            df[col] = indicators_df[col]
+        # Check if columns exist
+        if res_col not in enriched_data.columns or sup_col not in enriched_data.columns:
+            raise ValueError(f"Required columns {res_col} and {sup_col} not found in data")
 
         # Prepare series
-        high = df['High']
-        low = df['Low']
+        high = enriched_data['High']
+        low = enriched_data['Low']
 
         # Only breakout mode supported
         if self.mode != "breakout":
             raise ValueError(f"Mode '{self.mode}' is not supported yet.")
 
         # Forward-fill current SR levels
-        df['res_current'] = df[res_col].ffill()
-        df['sup_current'] = df[sup_col].ffill()
+        enriched_data['res_current'] = enriched_data[res_col].ffill()
+        enriched_data['sup_current'] = enriched_data[sup_col].ffill()
 
         # Detect end of SR levels
-        res_end = df[res_col].shift(1).notna() & df[res_col].isna()
-        sup_end = df[sup_col].shift(1).notna() & df[sup_col].isna()
+        res_end = enriched_data[res_col].shift(1).notna() & enriched_data[res_col].isna()
+        sup_end = enriched_data[sup_col].shift(1).notna() & enriched_data[sup_col].isna()
 
         # Initialize direction series
-        direction = pd.Series(0, index=df.index)
+        direction = pd.Series(0, index=enriched_data.index)
         direction.loc[res_end] = 1  # buy on resistance break
         direction.loc[sup_end] = -1  # sell on support break
 
@@ -143,10 +142,10 @@ class SimpleSREventGenerator(EventGenerator):
         result = pd.DataFrame({'direction': direction[event_mask]})
 
         if include_entry_price:
-            levels = pd.Series(index=df.index, dtype=float)
+            levels = pd.Series(index=enriched_data.index, dtype=float)
 
-            levels.loc[res_end] = df.loc[res_end, 'res_current']
-            levels.loc[sup_end] = df.loc[sup_end, 'sup_current']
+            levels.loc[res_end] = enriched_data.loc[res_end, 'res_current']
+            levels.loc[sup_end] = enriched_data.loc[sup_end, 'sup_current']
             result['entry_price'] = levels[event_mask]
 
         self.events = result

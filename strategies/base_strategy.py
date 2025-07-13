@@ -83,9 +83,9 @@ class BaseStrategy:
         # Then add strategy-specific indicators  
         enriched_data = self._enrich_with_strategy_indicators(enriched_data)
         
-        # Handle single symbol or multiple symbols
+        # Handle different data structures
         if isinstance(enriched_data, pd.DataFrame):
-            # Single symbol
+            # Single DataFrame
             events = self._generate_raw_events(enriched_data)
             
             if len(events) == 0:
@@ -100,24 +100,47 @@ class BaseStrategy:
             return events
             
         elif isinstance(enriched_data, dict):
-            # Multiple symbols
-            events_dict = {}
-            for symbol, symbol_data in enriched_data.items():
-                events = self._generate_raw_events(symbol_data)
+            # Check if this is the legacy format with intervals
+            if any(isinstance(v, dict) for v in enriched_data.values()):
+                # Legacy format: {interval: {symbol: df}}
+                events_dict = {}
+                for interval, symbols_data in enriched_data.items():
+                    events_dict[interval] = {}
+                    for symbol, symbol_data in symbols_data.items():
+                        events = self._generate_raw_events(symbol_data)
+                        
+                        if len(events) == 0:
+                            events_dict[interval][symbol] = events
+                            continue
+                        
+                        # Add vertical barrier
+                        events = self._add_vertical_barrier(events, symbol_data)
+                        
+                        events_dict[interval][symbol] = events
                 
-                if len(events) == 0:
+                if set_barriers:
+                    events_dict = self.set_barriers(events_dict, enriched_data, method=self.params.get('barrier_method', 'simple'))
+                    
+                return events_dict
+            else:
+                # Simplified format: {symbol: df}
+                events_dict = {}
+                for symbol, symbol_data in enriched_data.items():
+                    events = self._generate_raw_events(symbol_data)
+                    
+                    if len(events) == 0:
+                        events_dict[symbol] = events
+                        continue
+                    
+                    # Add vertical barrier
+                    events = self._add_vertical_barrier(events, symbol_data)
+                    
                     events_dict[symbol] = events
-                    continue
                 
-                # Add vertical barrier
-                events = self._add_vertical_barrier(events, symbol_data)
-                
-                events_dict[symbol] = events
-            
-            if set_barriers:
-                events_dict = self.set_barriers(events_dict, enriched_data, method=self.params.get('barrier_method', 'simple'))
-                
-            return events_dict
+                if set_barriers:
+                    events_dict = self.set_barriers(events_dict, enriched_data, method=self.params.get('barrier_method', 'simple'))
+                    
+                return events_dict
         else:
             raise ValueError("Data must be DataFrame or dict of DataFrames")
     
@@ -134,28 +157,55 @@ class BaseStrategy:
         
         # Generate trades and add indicator values
         if isinstance(events, dict):
-            # Multiple symbols
-            trades_dict = {}
-            for symbol, symbol_events in events.items():
-                if len(symbol_events) == 0:
-                    trades_dict[symbol] = symbol_events  # Empty DataFrame
-                    continue
+            # Check if this is the legacy format with intervals
+            if any(isinstance(v, dict) for v in events.values()):
+                # Legacy format: {interval: {symbol: events}}
+                trades_dict = {}
+                for interval, symbols_events in events.items():
+                    trades_dict[interval] = {}
+                    for symbol, symbol_events in symbols_events.items():
+                        if len(symbol_events) == 0:
+                            trades_dict[interval][symbol] = symbol_events  # Empty DataFrame
+                            continue
+                            
+                        symbol_data = enriched_data[interval][symbol]
+                        trades = generate_trades(
+                            symbol_data, 
+                            symbol_events,
+                            trailing_stop=trailing_stop,
+                            trailing_pct=trailing_pct,
+                            save_trail=save_trail,
+                            use_hl=use_hl
+                        )
+                        
+                        # Add indicator values at entry times
+                        trades = self._add_indicators_to_trades(trades, symbol_data)
+                        trades_dict[interval][symbol] = trades
+                        
+                return trades_dict
+            else:
+                # Simplified format: {symbol: events}
+                trades_dict = {}
+                for symbol, symbol_events in events.items():
+                    if len(symbol_events) == 0:
+                        trades_dict[symbol] = symbol_events  # Empty DataFrame
+                        continue
+                        
+                    symbol_data = enriched_data[symbol]
+                    trades = generate_trades(
+                        symbol_data, 
+                        symbol_events,
+                        trailing_stop=trailing_stop,
+                        trailing_pct=trailing_pct,
+                        save_trail=save_trail,
+                        use_hl=use_hl
+                    )
                     
-                symbol_data = enriched_data[symbol]
-                trades = generate_trades(
-                    symbol_data, 
-                    symbol_events,
-                    trailing_stop=trailing_stop,
-                    trailing_pct=trailing_pct,
-                    save_trail=save_trail,
-                    use_hl=use_hl
-                )
-                
-                # Add indicator values at entry times
-                trades = self._add_indicators_to_trades(trades, symbol_data)
-                trades_dict[symbol] = trades
-                
-            return trades_dict
+                    # Add indicator values at entry times
+                    trades = self._add_indicators_to_trades(trades, symbol_data)
+                    trades_dict[symbol] = trades
+                    
+                return trades_dict
         else:
             # Single symbol
             if len(events) == 0:
@@ -198,8 +248,24 @@ class BaseStrategy:
     def set_barriers(self, events, data, method='simple', **kwargs):
         """Set profit-taking and stop-loss barriers for events."""
         if isinstance(events, dict):
-            return {symbol: self._set_barriers_single(events[symbol], data[symbol], method, **kwargs) 
-                   for symbol in events.keys() if len(events[symbol]) > 0}
+            # Check if this is the legacy format with intervals
+            if any(isinstance(v, dict) for v in events.values()):
+                # Legacy format: {interval: {symbol: events}}
+                result = {}
+                for interval, symbols_events in events.items():
+                    result[interval] = {}
+                    for symbol, symbol_events in symbols_events.items():
+                        if len(symbol_events) > 0:
+                            result[interval][symbol] = self._set_barriers_single(
+                                symbol_events, data[interval][symbol], method, **kwargs
+                            )
+                        else:
+                            result[interval][symbol] = symbol_events
+                return result
+            else:
+                # Simplified format: {symbol: events}
+                return {symbol: self._set_barriers_single(events[symbol], data[symbol], method, **kwargs) 
+                       for symbol in events.keys() if len(events[symbol]) > 0}
         else:
             if len(events) == 0:
                 return events

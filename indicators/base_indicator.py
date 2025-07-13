@@ -7,24 +7,24 @@ class BaseIndicator(ABC):
     Base class for all technical indicators.
     """
     
-    def __init__(self, name=None):
+    def __init__(self):
         """
         Initialize the indicator.
         
         Args:
             name (str, optional): Name of the indicator
         """
-        self.name = name or self.__class__.__name__
         self.is_calculated = False
         self.values = None
+        self.column_names = self.get_column_names()
         
-    @abstractmethod
-    def calculate(self, data, append=True, **kwargs):
+
+    def _calculate_for_single_df(self, df, append=True, **kwargs):
         """
-        Calculate the indicator values.
+        Calculate the indicator values for a single dataframe.
         
         Args:
-            data (pd.DataFrame): Input data
+            df (pd.DataFrame): Input data
             append (bool): Whether to append to original DataFrame
             **kwargs: Additional parameters
             
@@ -33,22 +33,40 @@ class BaseIndicator(ABC):
         """
         pass
     
-    def calculate_for_dict(self, data_dict, append=True, **kwargs):
+    def calculate(self, data, append=True, **kwargs):
         """
-        Calculate indicator for a dictionary of dataframes.
+        Calculate indicator for different data structures.
         
         Args:
-            data_dict (dict): Dictionary of DataFrames {symbol: df}
+            data: Can be:
+                - pd.DataFrame: Single DataFrame
+                - dict: Dictionary of DataFrames {symbol: df} (simplified format)
+                - dict: Dictionary of dictionaries {interval: {symbol: df}} (legacy format)
             append (bool): Whether to append to original DataFrames
             **kwargs: Additional parameters
             
         Returns:
-            dict: Dictionary of DataFrames with indicators
+            Same structure as input data with indicators added
         """
-        result = {}
-        for symbol, df in data_dict.items():
-            result[symbol] = self.calculate(df, append=append, **kwargs)
-        return result
+        if isinstance(data, pd.DataFrame):
+            return self._calculate_for_single_df(data, append=append, **kwargs)
+        elif isinstance(data, dict):
+            # Check if this is the legacy format with intervals
+            if any(isinstance(v, dict) for v in data.values()):
+                # Legacy format: {interval: {symbol: df}}
+                result = {}
+                for interval, symbols_data in data.items():
+                    result[interval] = {}
+                    for symbol, df in symbols_data.items():
+                        result[interval][symbol] = self._calculate_for_single_df(df, append=append, **kwargs)
+                return result
+            else:
+                # Simplified format: {symbol: df}
+                for symbol, df in data.items():
+                    data[symbol] = self._calculate_for_single_df(df, append=append, **kwargs)
+                return data
+        else:
+            raise ValueError(f"Invalid data type: {type(data)}")
     
     def get_column_names(self, **kwargs):
         """
@@ -58,7 +76,7 @@ class BaseIndicator(ABC):
         Returns:
             list: List of column names
         """
-        return [self.name]
+        pass
     
     def _append_to_df(self, data, indicator_data):
         """
@@ -66,16 +84,9 @@ class BaseIndicator(ABC):
         """
         result = data.copy()
         
-        if isinstance(indicator_data, dict):
-            for key, values in indicator_data.items():
-                if isinstance(values, np.ndarray) and len(values) == len(result):
-                    result[key] = values
-                elif isinstance(values, pd.Series) and len(values) == len(result):
-                    result[key] = values
-        else:
-            column_name = self.name
-            if len(indicator_data) == len(result):
-                result[column_name] = indicator_data
+
+        for column_name in self.column_names:
+            result[column_name] = indicator_data[column_name]
                 
         return result
     
@@ -85,15 +96,7 @@ class BaseIndicator(ABC):
         """
         result = pd.DataFrame(index=data.index)
         
-        if isinstance(indicator_data, dict):
-            for key, values in indicator_data.items():
-                if isinstance(values, np.ndarray) and len(values) == len(result):
-                    result[key] = values
-                elif isinstance(values, pd.Series) and len(values) == len(result):
-                    result[key] = values
-        else:
-            column_name = self.name
-            if len(indicator_data) == len(result):
-                result[column_name] = indicator_data
+        for column_name in self.column_names:
+            result[column_name] = indicator_data[column_name]
                 
         return result
