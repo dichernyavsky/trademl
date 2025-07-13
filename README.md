@@ -328,16 +328,8 @@ trades = strategy.generate_trades(price_data)
 - **Backtesting Engine**: Comprehensive strategy evaluation tools
 - **Risk Management**: Position sizing and portfolio-level risk controls
 
-## Documentation
 
-- **Data Processing**: See `data_process/README.md` for detailed data loading examples
-- **Usage Examples**: See `data_process/USAGE_EXAMPLES.md` for comprehensive usage scenarios
-- **Environment Setup**: See `ENVIRONMENT_SETUP.md` for detailed setup instructions
+## References
 
-## Contributing
-
-This project is under active development. Contributions are welcome!
-
-## License
-
-[Add your license here]
+This framework implements concepts from:
+- López de Prado, M. (2018). *Advances in Financial Machine Learning*.
