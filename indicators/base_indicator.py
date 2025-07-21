@@ -16,7 +16,8 @@ class BaseIndicator(ABC):
         """
         self.is_calculated = False
         self.values = None
-        self.column_names = self.get_column_names()
+        # Don't call get_column_names here as it's abstract
+        # self.column_names = self.get_column_names()
         
 
     def _calculate_for_single_df(self, df, append=True, **kwargs):
@@ -61,13 +62,16 @@ class BaseIndicator(ABC):
                         result[interval][symbol] = self._calculate_for_single_df(df, append=append, **kwargs)
                 return result
             else:
-                # Simplified format: {symbol: df}
+                # Simplified format: {symbol: df} - OPTIMIZED
+                # Create a copy of the data dict to avoid modifying the original
+                result = {}
                 for symbol, df in data.items():
-                    data[symbol] = self._calculate_for_single_df(df, append=append, **kwargs)
-                return data
+                    result[symbol] = self._calculate_for_single_df(df, append=append, **kwargs)
+                return result
         else:
             raise ValueError(f"Invalid data type: {type(data)}")
     
+    @abstractmethod
     def get_column_names(self, **kwargs):
         """
         Get the column names that this indicator produces.
@@ -84,8 +88,8 @@ class BaseIndicator(ABC):
         """
         result = data.copy()
         
-
-        for column_name in self.column_names:
+        column_names = self.get_column_names()
+        for column_name in column_names:
             result[column_name] = indicator_data[column_name]
                 
         return result
@@ -96,7 +100,8 @@ class BaseIndicator(ABC):
         """
         result = pd.DataFrame(index=data.index)
         
-        for column_name in self.column_names:
+        column_names = self.get_column_names()
+        for column_name in column_names:
             result[column_name] = indicator_data[column_name]
                 
         return result

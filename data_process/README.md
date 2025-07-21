@@ -298,5 +298,5 @@ print(f"Trades: {len(trades['BTCUSDT'])}")
 
 See the following files for complete examples:
 - `download_full_history.py`: Full historical data download script
-- `get_popular_symbols.py`: Symbol fetching script
+- `get_popular_symbols.py`: Symbol fetching script 
 - `USAGE_EXAMPLES.md`: Detailed usage examples 

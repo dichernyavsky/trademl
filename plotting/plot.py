@@ -77,13 +77,14 @@ def lightness(color, lightness=.94):
 
 class Indicator:
     """Simple indicator class to hold data and plotting options."""
-    def __init__(self, data, name=None, overlay=False, color=None, scatter=False, plot=True):
+    def __init__(self, data, name=None, overlay=False, color=None, scatter=False, plot=True, subplot_group=None):
         self.data = np.asarray(data)
         self.name = name
         self.overlay = overlay
         self.color = color
         self.scatter = scatter
         self.plot = plot
+        self.subplot_group = subplot_group  # Group indicators on same subplot
 
 def plot_market_data(
     df: pd.DataFrame,
@@ -672,13 +673,17 @@ def plot_market_data(
                     y_value = df.iloc[idx]['Close']
                     
                 signal_y_values.append(y_value)
-                signal_values.append(int(non_zero_signals[signal_time]))
+                # Handle NaN values before converting to int
+                signal_val = non_zero_signals[signal_time]
+                if pd.isna(signal_val):
+                    continue  # Skip NaN values
+                signal_values.append(int(signal_val))
                 
                 # Create tooltip
                 if signals_config is not None:
-                    tooltip = f"{signal_col}: {non_zero_signals[signal_time]} (price: {y_value:.4f})"
+                    tooltip = f"{signal_col}: {signal_val} (price: {y_value:.4f})"
                 else:
-                    tooltip = f"{signal_col}: {non_zero_signals[signal_time]}"
+                    tooltip = f"{signal_col}: {signal_val}"
                 signal_tooltips.append(tooltip)
             
             if not signal_indices:
@@ -742,79 +747,99 @@ def plot_market_data(
         ohlc_colors = colorgen()
         indicator_figs = []
         
+        # Group indicators by subplot_group
+        grouped_indicators = {}
         for i, ind in enumerate(indicators):
             if not ind.plot:
                 continue
                 
-            value = np.atleast_2d(ind.data)
-            
             if ind.overlay:
+                # Overlay indicators go on main chart
+                group_key = 'overlay'
+            elif ind.subplot_group is not None:
+                # Grouped indicators share a subplot
+                group_key = f'group_{ind.subplot_group}'
+            else:
+                # Each indicator gets its own subplot
+                group_key = f'single_{i}'
+                
+            if group_key not in grouped_indicators:
+                grouped_indicators[group_key] = []
+            grouped_indicators[group_key].append((i, ind))
+        
+        # Process each group
+        for group_key, group_indicators in grouped_indicators.items():
+            if group_key == 'overlay':
                 fig = fig_ohlc
             else:
                 fig = new_indicator_figure()
                 indicator_figs.append(fig)
+            
+            # Process all indicators in this group
+            for i, ind in group_indicators:
+                value = np.atleast_2d(ind.data)
                 
-            tooltips = []
-            colors = ind.color
-            colors = colors and cycle([colors]) or (
-                cycle([next(ohlc_colors)]) if ind.overlay else colorgen())
-                
-            if isinstance(ind.name, str):
-                tooltip_label = ind.name
-                legend_labels = [LegendStr(ind.name)] * len(value)
-            else:
-                tooltip_label = ", ".join(ind.name)
-                legend_labels = [LegendStr(item) for item in ind.name]
-                
-            for j, arr in enumerate(value):
-                color = next(colors)
-                source_name = f'{legend_labels[j]}_{i}_{j}'
-                
-                if arr.dtype == bool:
-                    arr = arr.astype(int)
+                tooltips = []
+                colors = ind.color
+                colors = colors and cycle([colors]) or (
+                    cycle([next(ohlc_colors)]) if ind.overlay else colorgen())
                     
-                source.add(arr, source_name)
-                tooltips.append(f'@{{{source_name}}}{{0,0.0[0000]}}')
-                
-                if ind.overlay:
-                    ohlc_extreme_values[source_name] = arr
-                    
-                if ind.scatter:
-                    fig.circle(
-                        'index', source_name, source=source,
-                        legend_label=legend_labels[j], color=color,
-                        line_color='black', fill_alpha=.8,
-                        radius=BAR_WIDTH / 2 * .9
-                    )
+                if isinstance(ind.name, str):
+                    tooltip_label = ind.name
+                    legend_labels = [LegendStr(ind.name)] * len(value)
                 else:
-                    fig.line(
-                        'index', source_name, source=source,
-                        legend_label=legend_labels[j], line_color=color,
-                        line_width=1.3
-                    )
+                    tooltip_label = ", ".join(ind.name)
+                    legend_labels = [LegendStr(item) for item in ind.name]
                     
-                # Add mean line if appropriate
-                mean = np.nanmean(arr) if not np.all(np.isnan(arr)) else np.nan
-                if not np.isnan(mean) and (abs(mean) < .1 or
-                                          round(abs(mean), 1) == .5 or
-                                          round(abs(mean), -1) in (50, 100, 200)):
-                    fig.add_layout(Span(
-                        location=float(mean), dimension='width',
-                        line_color='#666666', line_dash='dashed',
-                        level='underlay', line_width=.5
-                    ))
+                for j, arr in enumerate(value):
+                    color = next(colors)
+                    source_name = f'{legend_labels[j]}_{i}_{j}'
                     
-                if ind.overlay:
-                    ohlc_tooltips.append((tooltip_label, NBSP.join(tooltips)))
-                else:
-                    r = fig.line('index', source_name, source=source, line_color=color, line_width=1.3)
-                    set_tooltips(fig, [(tooltip_label, NBSP.join(tooltips))], vline=True, renderers=[r])
+                    if arr.dtype == bool:
+                        arr = arr.astype(int)
+                        
+                    source.add(arr, source_name)
+                    tooltips.append(f'@{{{source_name}}}{{0,0.0[0000]}}')
                     
-            # If the sole indicator line on this figure,
-            # have the legend only contain text without the glyph
-            if len(value) == 1:
-                fig.legend.glyph_width = 0
-                
+                    if ind.overlay:
+                        ohlc_extreme_values[source_name] = arr
+                        
+                    if ind.scatter:
+                        fig.circle(
+                            'index', source_name, source=source,
+                            legend_label=legend_labels[j], color=color,
+                            line_color='black', fill_alpha=.8,
+                            radius=BAR_WIDTH / 2 * .9
+                        )
+                    else:
+                        fig.line(
+                            'index', source_name, source=source,
+                            legend_label=legend_labels[j], line_color=color,
+                            line_width=1.3
+                        )
+                        
+                    # Add mean line if appropriate
+                    mean = np.nanmean(arr) if not np.all(np.isnan(arr)) else np.nan
+                    if not np.isnan(mean) and (abs(mean) < .1 or
+                                              round(abs(mean), 1) == .5 or
+                                              round(abs(mean), -1) in (50, 100, 200)):
+                        fig.add_layout(Span(
+                            location=float(mean), dimension='width',
+                            line_color='#666666', line_dash='dashed',
+                            level='underlay', line_width=.5
+                        ))
+                        
+                    if ind.overlay:
+                        ohlc_tooltips.append((tooltip_label, NBSP.join(tooltips)))
+                    else:
+                        r = fig.line('index', source_name, source=source, line_color=color, line_width=1.3)
+                        set_tooltips(fig, [(tooltip_label, NBSP.join(tooltips))], vline=True, renderers=[r])
+                        
+                # If the sole indicator line on this figure,
+                # have the legend only contain text without the glyph
+                if len(value) == 1 and len(group_indicators) == 1:
+                    fig.legend.glyph_width = 0
+                    
         return indicator_figs
     
     # Plot the components
@@ -933,6 +958,199 @@ def plot_market_data(
         merge_tools=True,
         **kwargs
     )
+    
+    # Show the plot
+    show(fig, browser=None if open_browser else 'none')
+    
+    return fig
+
+
+def plot_trailing_stop_analysis(
+    df: pd.DataFrame,
+    events: pd.DataFrame,
+    trades_results: Dict[str, pd.DataFrame],
+    filename: str = '',
+    plot_width: int = None,
+    show_legend: bool = True,
+    open_browser: bool = True
+):
+    """
+    Plot trailing stop analysis with multiple trailing percentages.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        DataFrame with OHLC(V) data. Must have columns: Open, High, Low, Close.
+    events : pd.DataFrame
+        DataFrame of events with index as timestamps and columns 'direction', 'pt', 'sl', 'entry_price'.
+    trades_results : Dict[str, pd.DataFrame]
+        Dictionary with trailing percentages as keys and trade results as values.
+        Each trade result should have 'dynamic_stop_path' column if save_trail=True was used.
+    filename : str
+        If specified, the plot is saved to this file.
+    plot_width : int
+        Width of the plot in pixels.
+    show_legend : bool
+        Whether to show the legend.
+    open_browser : bool
+        Whether to open the browser when saving to file.
+    
+    Returns:
+    --------
+    fig : bokeh.plotting.figure
+        The Bokeh figure object.
+    """
+    # Reset Bokeh state
+    _bokeh_reset(filename)
+    
+    # Constants
+    COLORS = [BEAR_COLOR, BULL_COLOR]
+    BAR_WIDTH = .8
+    NBSP = '\N{NBSP}' * 4
+    
+    # Check if we have a datetime index
+    is_datetime_index = isinstance(df.index, pd.DatetimeIndex)
+    
+    # Ensure we have the required columns
+    required_cols = ['Open', 'High', 'Low', 'Close']
+    if not all(col in df.columns for col in required_cols):
+        raise ValueError(f"DataFrame must contain columns: {required_cols}")
+    
+    # Set up plot dimensions
+    if plot_width is None:
+        plot_width = 1200
+    plot_height = 600
+    
+    # Create figure
+    fig = _figure(
+        width=plot_width,
+        height=plot_height,
+        title="Trailing Stop Analysis",
+        x_axis_type='datetime' if is_datetime_index else 'linear',
+        tools="pan,wheel_zoom,box_zoom,reset,save",
+        active_scroll='wheel_zoom'
+    )
+    
+    # Get the first event to determine the time range
+    if events.empty:
+        raise ValueError("Events DataFrame is empty")
+    
+    event_start = events.index[0]
+    event_end = events['t1'].iloc[0] if 't1' in events.columns else df.index[-1]
+    
+    # Filter data to event time range
+    event_data = df.loc[event_start:event_end]
+    
+    # Plot candlestick chart
+    inc = event_data.Close >= event_data.Open
+    dec = event_data.Close < event_data.Open
+    
+    # Convert datetime index to milliseconds for Bokeh
+    if is_datetime_index:
+        x_values = event_data.index.astype('int64') // 10**6  # Convert to milliseconds
+    else:
+        x_values = event_data.index
+    
+    # Plot candlesticks
+    fig.segment(x_values, event_data.High, x_values, event_data.Low, color="black", line_width=1)
+    
+    # Bullish candles (green)
+    fig.vbar(x_values[inc], BAR_WIDTH, event_data.Open[inc], event_data.Close[inc], 
+             fill_color=BULL_COLOR, line_color="black", line_width=1)
+    
+    # Bearish candles (red)
+    fig.vbar(x_values[dec], BAR_WIDTH, event_data.Open[dec], event_data.Close[dec], 
+             fill_color=BEAR_COLOR, line_color="black", line_width=1)
+    
+    # Plot barriers
+    pt_level = events['pt'].iloc[0]
+    sl_level = events['sl'].iloc[0]
+    
+    # Take profit line
+    pt_span = Span(location=pt_level, dimension='width', line_color='green', 
+                   line_dash='dashed', line_width=2, line_alpha=0.7)
+    fig.add_layout(pt_span)
+    
+    # Stop loss line
+    sl_span = Span(location=sl_level, dimension='width', line_color='red', 
+                   line_dash='dashed', line_width=2, line_alpha=0.7)
+    fig.add_layout(sl_span)
+    
+    # Plot entry point
+    entry_price = events['entry_price'].iloc[0]
+    if is_datetime_index:
+        entry_x = event_start.value // 10**6
+    else:
+        entry_x = event_start
+    
+    fig.triangle(entry_x, entry_price, size=15, color='blue', alpha=0.8)
+    
+    # Plot trailing stop paths
+    colors = ['red', 'orange', 'purple', 'brown', 'pink']
+    color_cycle = cycle(colors)
+    
+    for i, (pct, result) in enumerate(trades_results.items()):
+        if 'dynamic_stop_path' in result.columns:
+            trail_path = result['dynamic_stop_path'].iloc[0]
+            
+            if trail_path is not None and len(trail_path) > 0:
+                # Convert trail path index to milliseconds if datetime
+                if is_datetime_index:
+                    trail_x = trail_path.index.astype('int64') // 10**6
+                else:
+                    trail_x = trail_path.index
+                
+                color = next(color_cycle)
+                fig.line(trail_x, trail_path.values, 
+                        line_width=2, line_color=color, line_alpha=0.8,
+                        legend_label=f'Trailing {pct}%')
+                
+                # Plot exit point if exists
+                if not pd.isna(result['exit_time'].iloc[0]):
+                    exit_time = result['exit_time'].iloc[0]
+                    exit_price = result['exit_price'].iloc[0]
+                    
+                    if is_datetime_index:
+                        exit_x = exit_time.value // 10**6
+                    else:
+                        exit_x = exit_time
+                    
+                    fig.inverted_triangle(exit_x, exit_price, size=12, color=color, alpha=0.8)
+    
+    # Add legend items for barriers
+    if show_legend:
+        # Create invisible points for legend
+        fig.line([0], [0], line_color='green', line_dash='dashed', line_width=2, 
+                legend_label='Take Profit', visible=False)
+        fig.line([0], [0], line_color='red', line_dash='dashed', line_width=2, 
+                legend_label='Stop Loss', visible=False)
+        fig.triangle([0], [0], size=15, color='blue', alpha=0.8, 
+                    legend_label='Entry', visible=False)
+        
+        fig.legend.location = "top_left"
+        fig.legend.click_policy = "hide"
+    
+    # Format axes
+    if is_datetime_index:
+        fig.xaxis.formatter = DatetimeTickFormatter(
+            hours=["%H:%M"],
+            days=["%m/%d"],
+            months=["%m/%Y"],
+            years=["%Y"]
+        )
+    
+    fig.yaxis.formatter = NumeralTickFormatter(format='0.00')
+    
+    # Add grid
+    fig.grid.grid_line_alpha = 0.3
+    
+    # Add watermark
+    _watermark(fig)
+    
+    # Save or show
+    if filename:
+        filename = _windows_safe_filename(filename)
+        output_file(filename)
     
     # Show the plot
     show(fig, browser=None if open_browser else 'none')

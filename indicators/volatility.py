@@ -61,100 +61,98 @@ class BollingerBands(BaseIndicator):
         upper_band = middle_band + (std_dev * self.num_std)
         lower_band = middle_band - (std_dev * self.num_std)
         
+        # Get column names
+        column_names = self.get_column_names()
+        
         # Store the calculated values
         indicator_data = {
-            f'{self.column_names[0]}': middle_band,
-            f'{self.column_names[1]}': upper_band,
-            f'{self.column_names[2]}': lower_band,
-            #f'{self.column_names[3]}': (upper_band - lower_band) / middle_band  # Normalized width
+            column_names[0]: middle_band,
+            column_names[1]: upper_band,
+            column_names[2]: lower_band,
         }
         
+        self.values = indicator_data
         self.is_calculated = True
         
         # Return results according to the append parameter
         return self._append_to_df(data, indicator_data) if append else self._create_indicator_df(data, indicator_data)
     
-'''
 
-class ATR(BaseIndicator):
+
+class ATRIndicator(BaseIndicator):
+    """Average True Range (ATR) indicator.
+
+    Parameters
+    ----------
+    window : int, default 14
+        Lookback period for ATR calculation.
+    method : {"wilder", "sma"}, default "wilder"
+        - "wilder": exponential moving average with  alpha = 1 / window (classic ATR).
+        - "sma": simple moving average of True Range.
+    high_col, low_col, close_col : str
+        Column names in the OHLCV DataFrame.
+    name : str or None
+        Column prefix; if None, generated automatically.
     """
-    Average True Range (ATR) indicator.
-    
-    This indicator measures market volatility by decomposing the entire range 
-    of an asset for a given period.
-    """
-    
-    def __init__(self, window=14):
-        """
-        Initialize the ATR indicator.
-        
-        Args:
-            window (int): Window size for the average calculation
-            name (str): Name of this indicator instance
-        """
-        super().__init__()
+
+    def __init__(self,
+                 window: int = 14,
+                 method: str = "wilder",
+                 high_col: str = "High",
+                 low_col: str = "Low",
+                 close_col: str = "Close",
+                 name: str = None):
+                 
         self.window = window
-    
-    def get_column_names(self):
-        """Return column names produced by this indicator."""
-        return [
-            f'ATR_{self.window}'
-        ]
-    
-    def _calculate_for_single_df(self, data, append=True, **kwargs):
-        """
-        Calculate the Average True Range.
-        
-        Args:
-            data (pd.DataFrame): OHLCV data
-            append (bool): Whether to append results to original data
-            **kwargs: Additional parameters (ignored)
-            
-        Returns:
-            pd.DataFrame: DataFrame with ATR values
-        """
-        # Check if required columns exist
-        required_columns = ['High', 'Low', 'Close']
-        if not all(col in data.columns for col in required_columns):
-            raise ValueError(f"Data must contain columns: {required_columns}")
-        
-        # Calculate true range
-        high = data['High']
-        low = data['Low']
-        close = data['Close'].shift(1)  # Previous close
-        
-        # Handle first row where previous close is not available
-        close.iloc[0] = data['Open'].iloc[0] if 'Open' in data.columns else (high.iloc[0] + low.iloc[0]) / 2
-        
+        self.method = method.lower()
+        self.high_col = high_col
+        self.low_col = low_col
+        self.close_col = close_col
+        self._name = name or f"ATR_{window}"
+        super().__init__()
+
+    def get_column_names(self, **kwargs):
+        return [self._name]
+
+    def _calculate_for_single_df(self, data: pd.DataFrame, append: bool = True, **kwargs):
+        if data.empty:
+            return data
+
+        # Validate required columns
+        for col in (self.high_col, self.low_col, self.close_col):
+            if col not in data.columns:
+                raise ValueError(f"Column '{col}' missing from input DataFrame")
+
+        high = data[self.high_col]
+        low = data[self.low_col]
+        prev_close = data[self.close_col].shift(1)
+
+        # On the first bar replace NaN prev_close with mean of high/low
+        if prev_close.isna().iat[0]:
+            prev_close = prev_close.copy()
+            prev_close.iat[0] = (high.iat[0] + low.iat[0]) / 2
+
+        # True Range components
         tr1 = high - low
-        tr2 = abs(high - close)
-        tr3 = abs(low - close)
-        
-        true_range = pd.DataFrame({
-            'tr1': tr1,
-            'tr2': tr2,
-            'tr3': tr3
-        }).max(axis=1)
-        
-        # Calculate ATR
-        atr = true_range.rolling(window=self.window).mean()
-        
-        # Store the calculated values
-        self.values = {
-            f'{self.name}': atr,
-            f'{self.name}_TrueRange': true_range
-        }
-        
-        self.is_calculated = True
-        
-        # Return results according to the append parameter
-        if append:
-            result = data.copy()
-            for key, values in self.values.items():
-                result[key] = values
-            return result
+        tr2 = (high - prev_close).abs()
+        tr3 = (low - prev_close).abs()
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+        # ATR smoothing
+        if self.method == "sma":
+            atr = true_range.rolling(window=self.window, min_periods=self.window).mean()
+        elif self.method == "wilder":
+            alpha = 1 / self.window
+            atr = true_range.ewm(alpha=alpha, adjust=False).mean()
         else:
-            return pd.DataFrame(self.values, index=data.index)
+            raise ValueError("method must be 'wilder' or 'sma'")
+
+        indicator_data = {self._name: atr}
+        self.values = indicator_data
+        self.is_calculated = True
+
+        return (self._append_to_df(data, indicator_data)
+                if append else self._create_indicator_df(data, indicator_data))
     
     
 
@@ -223,4 +221,3 @@ class VolatilityRatio(BaseIndicator):
         else:
             return pd.DataFrame(self.values, index=data.index)
     
-'''

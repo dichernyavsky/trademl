@@ -5,9 +5,9 @@ from ..events.indicator_events import SimpleSREventGenerator
 
 
 
-class SimpleSREventStrategy(BaseStrategy):
-    def __init__(self, params=None):
-        super().__init__(params)
+class SimpleSRStrategy(BaseStrategy):
+    def __init__(self, params=None, barrier_strategy=None):
+        super().__init__(params, barrier_strategy)
         # Extract parameters for the event generator
         generator_params = {
             'lookback': self.params.get('lookback', 20),
@@ -20,4 +20,7 @@ class SimpleSREventStrategy(BaseStrategy):
         Generate raw SR breakout events for a single symbol.
         """
         return self.event_generator.generate(data, include_entry_price=True)
+
+# Alias for backward compatibility
+SimpleSREventStrategy = SimpleSRStrategy
 
