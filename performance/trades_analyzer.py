@@ -26,11 +26,13 @@ def quick_trades_analysis(trades: Union[Dict[str, pd.DataFrame], pd.DataFrame],
                 win_loss_ratio = loss_trades / profit_trades if profit_trades > 0 else float('inf')
                 time_barrier_ratio = time_barrier_trades / total_trades
                 loss_plus_time_ratio = (loss_trades + time_barrier_trades) / profit_trades if profit_trades > 0 else float('inf')
-                
+                profit_ratio = profit_trades / total_trades  # This is like accuracy
+
                 if show_all:
                     print(f"{key}: Win/Loss={round(win_loss_ratio, round_digits)}, "
                           f"Time={round(time_barrier_ratio, round_digits)}, "
-                          f"(Loss+Time)/Profit={round(loss_plus_time_ratio, round_digits)}")
+                          f"(Loss+Time)/Profit={round(loss_plus_time_ratio, round_digits)}, "
+                          f"Profit Ratio={round(profit_ratio, round_digits)}")
                 else:
                     print(f"{key}: {round(win_loss_ratio, round_digits)}")
     else:

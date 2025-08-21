@@ -10,12 +10,12 @@ import pandas as pd
 from typing import List, Dict, Optional, Union, Tuple
 from sklearn.base import BaseEstimator, clone
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, BaseCrossValidator
 from sklearn.metrics import accuracy_score
 import warnings
 
 
-class PurgedKFold:
+class PurgedKFold(BaseCrossValidator):
     """
     Purged K-Fold Cross-Validation for time series data.
     
@@ -31,8 +31,13 @@ class PurgedKFold:
             n_splits: Number of folds
             embargo_pct: Percentage of samples to embargo around test set
         """
+        super().__init__()
         self.n_splits = n_splits
         self.embargo_pct = embargo_pct
+    
+    def get_n_splits(self, X=None, y=None, groups=None):
+        """Get the number of splits."""
+        return self.n_splits
         
     def split(self, X: pd.DataFrame) -> List[Tuple[np.ndarray, np.ndarray]]:
         """

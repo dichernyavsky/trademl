@@ -3,7 +3,9 @@ Event generators based on technical indicators.
 
 These event generators use custom indicator classes to generate directional trade events.
 """
+from __future__ import annotations
 
+from typing import Literal, Dict, Any, Optional
 import pandas as pd
 import numpy as np
 from .base import EventGenerator, EventType
@@ -69,84 +71,126 @@ class BollingerBandsEventGenerator(EventGenerator):
         self.events = events_df
         return self.events
 
+# ---------------------------------------------------------------------
+# Simple Support/Resistance Event Generator
+# ---------------------------------------------------------------------
 
+_InclRepl = Literal["ignore", "include", "only"]
+
+
+def _normalise_flag(flag: str | None) -> _InclRepl:
+    if flag is None:
+        return "ignore"
+    f = flag.lower()
+    if f not in ("ignore", "include", "only"):
+        raise ValueError(
+            "include_replacement must be 'ignore', 'include' or 'only' – got %s" % flag
+        )
+    return f  # type: ignore [return-value]
+
+
+# ---------------------------------------------------------------------------
+# Event‑generator
+# ---------------------------------------------------------------------------
 class SimpleSREventGenerator(EventGenerator):
-    """
-    Generates events based on Support and Resistance levels.
-    
-    Events are generated when price approaches, breaks, or bounces from support and
-    resistance levels with expected direction based on the event type.
-    """
-    
-    def __init__(self, lookback: int = 20, mode: str = "breakout"):
-        """
-        Initialize the Support/Resistance event generator.
-        
-        Parameters:
-            lookback: Number of bars to look before and after for pivot points
-            mode: 'reversal' for bounces, 'breakout' for level breaks
-        """
+    """Generate breakout events on Support/Resistance levels."""
+
+    def __init__(
+        self,
+        lookback: int = 20,
+        mode: str = "breakout",
+        *,
+        include_replacement: _InclRepl | str = "only",
+    ) -> None:
         super().__init__(event_type=EventType.DIRECTION_SPECIFIC)
-        self.lookback = lookback
+        if mode != "breakout":
+            raise ValueError("Only 'breakout' mode is supported right now.")
+
+        self.lookback = int(lookback)
         self.mode = mode
-        
-        # Add Support/Resistance indicator
-        self.add_indicator(SimpleSupportResistance(lookback=lookback))
-    
-    def generate(self, data: pd.DataFrame, keep_indicators: list = [], include_entry_price: bool = False) -> pd.DataFrame:
-        """
-        Generate breakout events based on support and resistance levels.
+        self.include_replacement: _InclRepl = _normalise_flag(include_replacement)
 
-        Parameters:
-            data: OHLCV DataFrame
-            include_entry_price: Whether to include breakout price as the entry price in the output
-            keep_indicators: List of indicator names to keep in the output
-        Returns:
-            DataFrame with event direction and optionally breakout price
-        """
-        # Calculate pivots and SR levels using the indicator directly
-        sr_indicator = SimpleSupportResistance(lookback=self.lookback)
-        enriched_data = sr_indicator.calculate(data, append=True)
+        # register indicator – calculated once per .generate() call
+        self.add_indicator(SimpleSupportResistance(lookback=self.lookback))
 
-        # Define column names for pivots and SR
+    # ------------------------------------------------------------------
+    def _detect_events(self, df: pd.DataFrame) -> pd.Series:
+        """Return a *direction* Series (+1/‑1) with index == df.index."""
+
         res_col = f"SimpleSR_{self.lookback}_Resistance"
         sup_col = f"SimpleSR_{self.lookback}_Support"
+        if res_col not in df.columns or sup_col not in df.columns:
+            raise KeyError("Support/Resistance columns are missing – did you run the indicator?")
 
-        # Check if columns exist
-        if res_col not in enriched_data.columns or sup_col not in enriched_data.columns:
-            raise ValueError(f"Required columns {res_col} and {sup_col} not found in data")
+        high = df["High"]
+        low = df["Low"]
+        res = df[res_col]
+        sup = df[sup_col]
 
-        # Prepare series
-        high = enriched_data['High']
-        low = enriched_data['Low']
+        prev_res = res.shift(1)
+        prev_sup = sup.shift(1)
 
-        # Only breakout mode supported
-        if self.mode != "breakout":
-            raise ValueError(f"Mode '{self.mode}' is not supported yet.")
+        # ---------------- classic break‑out (line disappears) -------------
+        res_end = prev_res.notna() & res.isna() & (high >= prev_res)  # resistance broken
+        sup_end = prev_sup.notna() & sup.isna() & (low <= prev_sup)   # support broken
 
-        # Forward-fill current SR levels
-        enriched_data['res_current'] = enriched_data[res_col].ffill()
-        enriched_data['sup_current'] = enriched_data[sup_col].ffill()
+        # ---------------- replacement‑bar break‑out -----------------------
+        res_repl = prev_res.notna() & res.notna() & (res != prev_res) & (high >= prev_res)
+        sup_repl = prev_sup.notna() & sup.notna() & (sup != prev_sup) & (low <= prev_sup)
 
-        # Detect end of SR levels
-        res_end = enriched_data[res_col].shift(1).notna() & enriched_data[res_col].isna()
-        sup_end = enriched_data[sup_col].shift(1).notna() & enriched_data[sup_col].isna()
+        # ---------------- combine according to flag -----------------------
+        if self.include_replacement == "ignore":
+            res_mask, sup_mask = res_end, sup_end
+        elif self.include_replacement == "only":
+            res_mask, sup_mask = res_repl, sup_repl
+        else:  # "include"
+            res_mask = res_end | res_repl
+            sup_mask = sup_end | sup_repl
 
-        # Initialize direction series
-        direction = pd.Series(0, index=enriched_data.index)
-        direction.loc[res_end] = 1  # buy on resistance break
-        direction.loc[sup_end] = -1  # sell on support break
+        direction = pd.Series(0, index=df.index, dtype="int8")
+        direction.loc[res_mask] = +1
+        direction.loc[sup_mask] = -1
+        return direction
 
-        # Filter events
-        event_mask = direction != 0
-        result = pd.DataFrame({'direction': direction[event_mask]})
+    # ------------------------------------------------------------------
+    def generate(
+        self,
+        data: pd.DataFrame,
+        *,
+        include_entry_price: bool = False,
+        keep_indicators: list[str] | None = None,
+    ) -> pd.DataFrame:  # noqa: D401 – one‑liner OK here
+        """Generate events dataframe."""
 
+        keep_indicators = keep_indicators or []
+
+        # ---- 1) indicator ----------------------------------------------------
+        ind_results = self.calculate_indicators(data)
+        df = data.join(ind_results, rsuffix="_ind")  # avoid column clashes
+
+        # ---- 2) detect events -----------------------------------------------
+        direction = self._detect_events(df)
+        mask = direction != 0
+
+        events = pd.DataFrame({"direction": direction[mask]})
+
+        # ---- 3) entry price --------------------------------------------------
         if include_entry_price:
-            levels = pd.Series(index=enriched_data.index, dtype=float)
+            res_col = f"SimpleSR_{self.lookback}_Resistance"
+            sup_col = f"SimpleSR_{self.lookback}_Support"
 
-            levels.loc[res_end] = enriched_data.loc[res_end, 'res_current']
-            levels.loc[sup_end] = enriched_data.loc[sup_end, 'sup_current']
-            result['entry_price'] = levels[event_mask]
+            prev_res = df[res_col].shift(1)
+            prev_sup = df[sup_col].shift(1)
 
-        self.events = result
-        return result
+            entry_price = pd.Series(index=df.index, dtype="float64")
+            entry_price.loc[direction == +1] = prev_res[direction == +1]
+            entry_price.loc[direction == -1] = prev_sup[direction == -1]
+
+            events["entry_price"] = entry_price[mask]
+
+        # ---- 4) debug: keep selected indicator columns ----------------------
+        if keep_indicators:
+            events = events.join(ind_results.loc[mask, keep_indicators])
+
+        self.events = events
+        return events
