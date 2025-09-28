@@ -194,6 +194,7 @@ class DataLoader:
         """
         # Map timeframe to folder name
         timeframe_folders = {
+            "1s": "1_second",
             "1m": "1_minute",
             "5m": "5_minutes", 
             "1h": "1_hour",
@@ -277,6 +278,7 @@ class DataLoader:
         """
         # Map intervals to folder names
         interval_folders = {
+            "1s": "1_second",
             "1m": "1_minute",
             "5m": "5_minutes", 
             "1h": "1_hour",

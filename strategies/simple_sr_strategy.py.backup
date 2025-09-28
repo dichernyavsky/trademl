@@ -23,10 +23,6 @@ class SimpleSRStrategy(BaseStrategy):
         **NEW.** Number of bars to wait *after* the signal candle before entering.
         ``0`` keeps the original behaviour (entry on signal bar), ``1`` delays by
         one full candle, etc.
-    entry_price_mode : {"close", "breakout"}, default "close"
-        **NEW.** Price to use for entry:
-        - "close": Use the close price of the entry bar (after offset)
-        - "breakout": Use the original breakout price (resistance/support level)
     """
 
     def __init__(self, params: dict | None = None, barrier_strategy=None):
@@ -44,10 +40,6 @@ class SimpleSRStrategy(BaseStrategy):
         self.entry_offset: int = int(self.params.get("entry_offset", 0))
         if self.entry_offset < 0:
             raise ValueError("entry_offset must be >= 0")
-        
-        self.entry_price_mode: str = self.params.get("entry_price_mode", "close")
-        if self.entry_price_mode not in ("close", "breakout"):
-            raise ValueError("entry_price_mode must be 'close' or 'breakout'")
 
     # ------------------------------------------------------------------------- #
     # Internal API
@@ -67,14 +59,6 @@ class SimpleSRStrategy(BaseStrategy):
 
         # fast‑exit if no shift requested
         if self.entry_offset == 0 or events.empty:
-            # If using breakout price mode, keep the original breakout prices
-            if self.entry_price_mode == "breakout" and "entry_price" in events.columns:
-                return events
-            # If using close price mode, update to close prices
-            elif self.entry_price_mode == "close":
-                events = events.copy()
-                events["entry_price"] = data.loc[events.index, "Close"].values
-                return events
             return events
 
         # 2) Compute new (delayed) index positions -------------------------------
@@ -94,16 +78,11 @@ class SimpleSRStrategy(BaseStrategy):
         events = events.iloc[in_bounds].copy()
         events.index = new_index  # move each row to its entry bar
 
-        # 4) Set entry price based on mode ----------------------------------------
-        if self.entry_price_mode == "close":
-            # Use close price of the entry bar (after offset)
-            events["entry_price"] = data.loc[new_index, "Close"].values
-        elif self.entry_price_mode == "breakout":
-            # Keep the original breakout price (already calculated by event generator)
-            # The entry_price column already contains the breakout prices
-            pass  # No change needed, breakout prices are already in entry_price
+        # 4) Re‑price entry to *close* of the entry bar
+        events["entry_price"] = data.loc[new_index, "Close"].values
 
         return events#.sort_index()
 
 # Alias for backward compatibility
 SimpleSREventStrategy = SimpleSRStrategy
+

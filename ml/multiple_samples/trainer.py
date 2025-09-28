@@ -39,13 +39,18 @@ class MultipleSamplesTrainer:
         self.universal_model = None  # Single model trained on all samples
         
     def train_single_models(self, dataset: MultipleSamplesDataset, 
-                           train_samples: List[str], **kwargs) -> Dict[str, BaseModel]:
+                           train_samples: List[str], 
+                           sample_weights_manager=None,
+                           weight_calculator_name=None,
+                           **kwargs) -> Dict[str, BaseModel]:
         """
         Train separate model for each sample.
         
         Args:
             dataset: MultipleSamplesDataset with samples
             train_samples: List of sample IDs to train on
+            sample_weights_manager: Optional SampleWeightsManager for calculating weights
+            weight_calculator_name: Name of the weight calculator to use
             **kwargs: Additional training parameters
             
         Returns:
@@ -65,22 +70,38 @@ class MultipleSamplesTrainer:
                     {sample_id: sample_data}, sample_data
                 )
             
+            # Calculate sample weights if manager is provided
+            sample_weights = None
+            if sample_weights_manager and weight_calculator_name:
+                try:
+                    sample_weights = sample_weights_manager.calculate_weights(
+                        weight_calculator_name, sample_data
+                    )
+                    print(f"   Using {weight_calculator_name} weights: min={sample_weights.min():.4f}, max={sample_weights.max():.4f}")
+                except Exception as e:
+                    print(f"   Warning: Could not calculate weights for {sample_id}: {e}")
+            
             # Create and train model
             model = self.model_class(**self.model_params)
-            model.fit(sample_data, **kwargs)
+            model.fit(sample_data, sample_weights=sample_weights, **kwargs)
             
             self.models[sample_id] = model
             
         return self.models
     
     def train_universal_model(self, dataset: MultipleSamplesDataset, 
-                             train_samples: List[str], **kwargs) -> BaseModel:
+                             train_samples: List[str], 
+                             sample_weights_manager=None,
+                             weight_calculator_name=None,
+                             **kwargs) -> BaseModel:
         """
         Train a single model on all samples combined.
         
         Args:
             dataset: MultipleSamplesDataset with samples
             train_samples: List of sample IDs to train on
+            sample_weights_manager: Optional SampleWeightsManager for calculating weights
+            weight_calculator_name: Name of the weight calculator to use
             **kwargs: Additional training parameters
             
         Returns:
@@ -113,9 +134,20 @@ class MultipleSamplesTrainer:
             # Combine enriched samples
             combined_data = pd.concat(enriched_samples.values(), ignore_index=True)
         
+        # Calculate sample weights if manager is provided
+        sample_weights = None
+        if sample_weights_manager and weight_calculator_name:
+            try:
+                sample_weights = sample_weights_manager.calculate_weights(
+                    weight_calculator_name, combined_data
+                )
+                print(f"Using {weight_calculator_name} weights: min={sample_weights.min():.4f}, max={sample_weights.max():.4f}")
+            except Exception as e:
+                print(f"Warning: Could not calculate weights for universal model: {e}")
+        
         # Create and train universal model
         self.universal_model = self.model_class(**self.model_params)
-        self.universal_model.fit(combined_data, **kwargs)
+        self.universal_model.fit(combined_data, sample_weights=sample_weights, **kwargs)
         
         return self.universal_model
     

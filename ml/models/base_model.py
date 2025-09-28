@@ -48,7 +48,7 @@ class BaseModel(ABC):
         pass
     
     def fit(self, trades_df: pd.DataFrame, feature_columns: Optional[List[str]] = None, 
-            target_column: str = 'bin', **kwargs) -> 'BaseModel':
+            target_column: str = 'bin', sample_weights: Optional[np.ndarray] = None, **kwargs) -> 'BaseModel':
         """
         Train the model on trading data.
         
@@ -56,6 +56,7 @@ class BaseModel(ABC):
             trades_df: DataFrameTrades with features and target
             feature_columns: List of feature column names (if None, auto-detect)
             target_column: Name of the target column
+            sample_weights: Optional array of sample weights for training
             **kwargs: Additional training parameters
             
         Returns:
@@ -78,6 +79,13 @@ class BaseModel(ABC):
         
         # Prepare training data
         X, y = self._prepare_training_data(trades_df)
+        
+        # Validate sample weights if provided
+        if sample_weights is not None:
+            if len(sample_weights) != len(X):
+                raise ValueError(f"Sample weights length ({len(sample_weights)}) must match number of samples ({len(X)})")
+            # Add sample weights to kwargs for model training
+            kwargs['sample_weight'] = sample_weights
         
         # Create and train model
         self.model = self._create_model(**self.model_params)

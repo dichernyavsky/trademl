@@ -324,12 +324,12 @@ class NormalizedMomentum(BaseIndicator):
         """Calculate Stochastic Oscillator %K."""
         low_min = data['Low'].rolling(window=window).min()
         high_max = data['High'].rolling(window=window).max()
-        stoch = 100 * (data['Close'] - low_min) / (high_max - low_min + 1e-9)
+        stoch = 100 * (data[self.column] - low_min) / (high_max - low_min + 1e-9)
         return stoch
     
     def _calculate_cci(self, data, window):
         """Calculate Commodity Channel Index."""
-        typical_price = (data['High'] + data['Low'] + data['Close']) / 3
+        typical_price = (data['High'] + data['Low'] + data[self.column]) / 3
         sma_tp = typical_price.rolling(window=window).mean()
         
         # Vectorized MAD calculation

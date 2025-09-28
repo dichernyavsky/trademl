@@ -125,6 +125,7 @@ class Barrier:
         out['bin'] = 0  # default label
         out['exit_time'] = pd.NaT
         out['exit_price'] = np.nan
+        out['r_target'] = np.nan  # return (exit_price - entry_price) / entry_price
         
         # Add entry price column if not already present
         if 'entry_price' not in out.columns:
@@ -187,8 +188,23 @@ class Barrier:
                 out.at[loc, 'bin'] = 0  # Time exit
                 out.at[loc, 'exit_time'] = barrier_time
                 out.at[loc, 'exit_price'] = close_data.loc[barrier_time]
+            
+            # Calculate return (r_target) based on direction (bin=1: PT, bin=-1: SL, bin=0: time)
+            exit_price  = out.at[loc, 'exit_price']
+            entry_price = out.at[loc, 'entry_price']
+            if pd.notna(exit_price) and pd.notna(entry_price) and entry_price != 0:
+                ret = (exit_price - entry_price) / entry_price
+                # apply direction consistently for all exit types
+                out.at[loc, 'r_target'] = ret * out.at[loc, 'direction']
+
+        
+        # Remove trades that exit on the same bar as they entered
+        same_bar_mask = out['exit_time'].notna() & (out['exit_time'] == out.index.to_series())
+        out = out.loc[~same_bar_mask]
         
         return out
+
+        
     
     def _generate_trades_with_trailing_stop(self, events, data, trailing_pct=None, 
                                           save_trail=False, use_hl=True, **kwargs):
@@ -385,7 +401,7 @@ class SimpleVolatilityBarrier(Barrier):
         
         # Create a copy of events to avoid modifying original
         result = events.copy()
-        result['target'] = pt_target  # Keep original target column with PT target
+        #result['target'] = pt_target  # Keep original target column with PT target
         
         # Calculate barriers based on position direction
         for i, (event_time, event_row) in enumerate(result.iterrows()):

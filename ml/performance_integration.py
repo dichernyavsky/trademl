@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Union, Any
 from ..performance import PerformanceAnalyzer, TradesAnalyzer
 from .multiple_samples import MultipleSamplesTrainer, MultipleSamplesEvaluator
 from .multiple_samples.dataset import MultipleSamplesDataset
-from ..models.base_model import BaseModel
+from .models.base_model import BaseModel
 
 
 class MLPerformanceIntegrator:
