@@ -35,15 +35,9 @@ class SimpleSRStrategy(BaseStrategy):
         # ---- event‑generator ------------------------------------------------------
         gen_params = {
             "lookback": self.params.get("lookback", 20),
-            "mode": self.params.get("mode", "breakout"),
-            "include_replacement": self.params.get("include_replacement", "ignore"),
+            "mode": self.params.get("mode", "breakout")
         }
         self.event_generator = SimpleSREventGenerator(**gen_params)
-
-        # ---- strategy‑specific params --------------------------------------------
-        self.entry_offset: int = int(self.params.get("entry_offset", 0))
-        if self.entry_offset < 0:
-            raise ValueError("entry_offset must be >= 0")
         
         self.entry_price_mode: str = self.params.get("entry_price_mode", "close")
         if self.entry_price_mode not in ("close", "breakout"):
@@ -53,57 +47,28 @@ class SimpleSRStrategy(BaseStrategy):
     # Internal API
     # ------------------------------------------------------------------------- #
     def _generate_raw_events(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Generate events with entry shifted by ``entry_offset`` bars.
+        """Generate events with entry at the same bar as the signal.
 
         The implementation is fully vectorised: no explicit Python loops, so it
         scales linearly with the number of rows even for tens of thousands of
         events.
-
-        If ``entry_offset`` pushes an entry past the last bar available, that
-        event is silently dropped.
         """
         # 1) Signal‑bar events
         events = self.event_generator.generate(data, include_entry_price=True)
 
-        # fast‑exit if no shift requested
-        if self.entry_offset == 0 or events.empty:
-            # If using breakout price mode, keep the original breakout prices
-            if self.entry_price_mode == "breakout" and "entry_price" in events.columns:
-                return events
-            # If using close price mode, update to close prices
-            elif self.entry_price_mode == "close":
-                events = events.copy()
-                events["entry_price"] = data.loc[events.index, "Close"].values
-                return events
+        if events.empty:
             return events
 
-        # 2) Compute new (delayed) index positions -------------------------------
-        signal_pos = data.index.get_indexer(events.index)
-        delayed_pos = signal_pos + self.entry_offset
-
-        # keep only positions that are still inside the data range
-        in_bounds = delayed_pos < len(data.index)
-        if not np.any(in_bounds):
-            # all delayed entries fall outside data ⇒ no tradable events
-            return events.iloc[0:0]  # empty frame with same columns
-
-        delayed_pos = delayed_pos[in_bounds]
-        new_index = data.index[delayed_pos]
-
-        # 3) Re‑index without losing the original per‑event information ----------
-        events = events.iloc[in_bounds].copy()
-        events.index = new_index  # move each row to its entry bar
-
-        # 4) Set entry price based on mode ----------------------------------------
+        # 3) Set entry price based on mode ----------------------------------------
         if self.entry_price_mode == "close":
-            # Use close price of the entry bar (after offset)
-            events["entry_price"] = data.loc[new_index, "Close"].values
+            # Use close price by UniqueBarID
+            events["entry_price"] = data.loc[events['UniqueBarID'], 'Close'].values
         elif self.entry_price_mode == "breakout":
             # Keep the original breakout price (already calculated by event generator)
             # The entry_price column already contains the breakout prices
             pass  # No change needed, breakout prices are already in entry_price
 
-        return events#.sort_index()
+        return events
 
 # Alias for backward compatibility
 SimpleSREventStrategy = SimpleSRStrategy

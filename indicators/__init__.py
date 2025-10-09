@@ -6,7 +6,7 @@ and strategy development.
 """
 
 from .base_indicator import BaseIndicator
-from .support_resistance import ClusterSupportResistance, SimpleSupportResistance
+from .support_resistance import SimpleSupportResistance
 from .volume_profile import VolumeProfileSupportResistance
 from .multi_timeframe_sr import MultiTimeframeSR
 from .volatility import BollingerBands
@@ -19,7 +19,6 @@ from .advanced import BreakoutGapATR, VWAPDistance, BollingerBandwidth, Normaliz
 
 __all__ = [
     'BaseIndicator',
-    'ClusterSupportResistance',
     'VolumeProfileSupportResistance',
     'MultiTimeframeSR',
     'BollingerBands',

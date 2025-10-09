@@ -216,6 +216,15 @@ class CryptoDataLoader:
         try:
             df = pd.read_parquet(file_path)
             logger.info(f"Loaded {len(df)} records from {file_path}")
+            
+            # Save OpenTime if index is datetime and OpenTime column doesn't exist
+            if 'OpenTime' not in df.columns and isinstance(df.index, pd.DatetimeIndex):
+                df['OpenTime'] = df.index
+            
+            # Set UniqueBarID as index
+            df.index = range(1, len(df) + 1)
+            df.index.name = 'UniqueBarID'
+            
             return df
         except Exception as e:
             logger.error(f"Failed to load {symbol} @ {interval}: {e}")

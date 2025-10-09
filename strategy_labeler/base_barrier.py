@@ -34,7 +34,6 @@ class Barrier:
         Returns:
             DataFrame: Events with added 'pt', 'sl', and 't1' columns
         """
-        print('Calc barrieser')
         # First calculate horizontal barriers (PT/SL)
         events = self._calculate_horizontal_barriers(events, data, **kwargs)
         
@@ -56,24 +55,26 @@ class Barrier:
 
         Behavior:
         - t1 = min(event_pos + hold_periods, last_index)
-        - If event_time is NOT found exactly in data index -> t1 = last available bar
+        - Uses searchsorted for consistent positioning with generate_trades
         """
         hold_periods = kwargs.get('hold_periods', self.hold_periods)
 
         result = events.copy()
         close_idx = data['Close'].index
-        n = len(close_idx)
+        idx_vals = close_idx.values
+        n = len(idx_vals)
 
-        # Get event positions in close index: without method => only exact matches, otherwise -1
-        pos = close_idx.get_indexer(result.index)           # shape (m,)
-        pos = np.where(pos == -1, n - 1, pos)               # if not found → last bar
+        ev_vals = result.index.values
+        # Use searchsorted like in generate_trades: first bar with time >= event_time
+        pos = np.searchsorted(idx_vals, ev_vals, side='left')
+        pos = np.clip(pos, 0, n - 1)
         target_pos = np.minimum(pos + int(hold_periods), n - 1)
 
         # Assign t1 times
         result['t1'] = close_idx.values[target_pos]
         return result
     
-    def generate_trades(self, events, data, use_hl=True, **kwargs):
+    def generate_trades(self, events, data, use_hl=True, entry_price_mode: str = 'close', **kwargs):
         """
         Generate trades with fixed profit-take (PT) and stop-loss (SL) barriers
         using a fast path: vectorized index mapping + a Numba window scanner.
@@ -98,6 +99,11 @@ class Barrier:
             If True and OHLCV data is provided, barrier touches are tested against
             High/Low (upper via High >= PT, lower via Low <= SL). Otherwise, tests
             are performed on Close.
+        entry_price_mode : str, default 'close'
+            How to set entry_price when it's NaN:
+            - 'close': use Close price at the actual execution bar (start_pos)
+            - 'open': use Open price at the actual execution bar (start_pos)
+            - 'exact': only fill if event timestamp exactly matches price index (original behavior)
         **kwargs
             Optional arguments. Recognized key:
             - 'hold_periods' (int): accepted for API compatibility but not used
@@ -184,13 +190,23 @@ class Barrier:
         upper = np.where(direction == 1, pt, sl).astype(np.float64)
         lower = np.where(direction == 1, sl, pt).astype(np.float64)
 
-        # Fill entry_price if NaN and exact timestamp exists (preserving your original behavior)
-        # Original code only set entry_price if event index is exactly in Close index.
-        # We replicate that: exact positions:
-        exact_pos = pd.Index(close.index).get_indexer(out.index)  # -1 if not exact
-        mask_exact = (exact_pos >= 0) & out['entry_price'].isna().values
-        if mask_exact.any():
-            out.loc[mask_exact, 'entry_price'] = close.iloc[exact_pos[mask_exact]].to_numpy()
+        # Fill entry_price for events where it's NaN
+        need_fill = out['entry_price'].isna().to_numpy()
+        if need_fill.any():
+            if entry_price_mode == 'exact':
+                # Original behavior: only fill if event timestamp exactly matches price index
+                exact_pos = pd.Index(close.index).get_indexer(out.index)  # -1 if not exact
+                mask_exact = (exact_pos >= 0) & need_fill
+                if mask_exact.any():
+                    out.loc[mask_exact, 'entry_price'] = close.iloc[exact_pos[mask_exact]].to_numpy()
+            else:
+                # New behavior: use price at the actual execution bar (start_pos)
+                sp = np.clip(start_pos[need_fill], 0, n-1)
+                if isinstance(data, pd.DataFrame) and entry_price_mode == 'open' and 'Open' in data.columns:
+                    prices = data['Open'].to_numpy(dtype=np.float64)
+                else:
+                    prices = close_np
+                out.loc[need_fill, 'entry_price'] = prices[sp]
 
         # Run Numba scanner
         if not is_ohlcv:
@@ -210,7 +226,10 @@ class Barrier:
 
         # Assign exits back to DataFrame
         # Exit time from position (time-exit already encoded as end_pos in numba)
-        exit_time = pd.to_datetime(idx[np.clip(exit_pos, 0, n-1)])
+        if is_ohlcv and 'OpenTime' in data.columns:
+            exit_time = data['OpenTime'].iloc[np.clip(exit_pos, 0, n-1)].values
+        else:
+            exit_time = pd.to_datetime(idx[np.clip(exit_pos, 0, n-1)])
         out['exit_time']  = exit_time
         out['exit_price'] = exit_price
         out['bin']        = bin_arr.astype(int)
@@ -224,7 +243,12 @@ class Barrier:
             # Fallback if t1 not found (shouldn't happen if your t1 was built from data index)
             t1_exact_pos = np.where(t1_exact_pos >= 0, t1_exact_pos, end_pos_r[time_mask.values])
             out.loc[time_mask, 'exit_price'] = close_np[t1_exact_pos]
-            out.loc[time_mask, 'exit_time']  = pd.to_datetime(idx[t1_exact_pos])
+            
+            # Get exit time from OpenTime column if available, otherwise use index
+            if is_ohlcv and 'OpenTime' in data.columns:
+                out.loc[time_mask, 'exit_time'] = data['OpenTime'].iloc[t1_exact_pos].values
+            else:
+                out.loc[time_mask, 'exit_time'] = pd.to_datetime(idx[t1_exact_pos])
 
         # Compute r_target when entry/exit are available
         ep = out['entry_price'].to_numpy(dtype=np.float64)
@@ -235,7 +259,7 @@ class Barrier:
             out.loc[good, 'r_target'] = ret * out.loc[good, 'direction'].to_numpy()
 
         # Drop trades that exit on the same bar as they entered (as in your original)
-        same_bar_mask = out['exit_time'].notna() & (out['exit_time'] == out.index.to_series())
+        same_bar_mask = out['exit_time'].notna() & (out['exit_time'] == out['OpenTime'])
         out = out.loc[~same_bar_mask].copy()
 
         return out

@@ -100,7 +100,7 @@ class SimpleSREventGenerator(EventGenerator):
         lookback: int = 20,
         mode: str = "breakout",
         *,
-        include_replacement: _InclRepl | str = "only",
+        include_replacement: _InclRepl | str = "include",
     ) -> None:
         super().__init__(event_type=EventType.DIRECTION_SPECIFIC)
         if mode != "breakout":
@@ -188,7 +188,12 @@ class SimpleSREventGenerator(EventGenerator):
 
             events["entry_price"] = entry_price[mask]
 
-        # ---- 4) debug: keep selected indicator columns ----------------------
+        # ---- 4) Add UniqueBarID and OpenTime to events ----------------------
+        events['UniqueBarID'] = df.index[mask]
+        if 'OpenTime' in df.columns:
+            events['OpenTime'] = df['OpenTime'][mask]
+
+        # ---- 5) debug: keep selected indicator columns ----------------------
         if keep_indicators:
             events = events.join(ind_results.loc[mask, keep_indicators])
 

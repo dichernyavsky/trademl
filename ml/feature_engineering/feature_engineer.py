@@ -149,25 +149,23 @@ class FeatureEngineer:
             return trades_df.copy()
 
         # Join base‑TF features
-        entry_idx = self._entry_times(trades_df)
-        out = trades_df.join(market_df.loc[entry_idx, columns], how="left")
+        entry_bar_ids = self._entry_bar_ids(trades_df)
+        out = trades_df.join(market_df.loc[entry_bar_ids, columns], how="left")
 
         # Join HTF features
         if self.htf_manager is not None and htf_df is not None:
             htf_cols = [c for c in self.htf_manager.get_indicator_columns() if c in htf_df.columns]
             if htf_cols:
-                out = out.join(htf_df.loc[entry_idx, htf_cols], how="left")
+                out = out.join(htf_df.loc[entry_bar_ids, htf_cols], how="left")
 
         return out
 
     # ------------------------- static helpers -------------------------
     @staticmethod
-    def _entry_times(trades_df: pd.DataFrame) -> pd.Index:
-        if "t0" in trades_df.columns:
-            return pd.Index(trades_df["t0"].values)
-        if isinstance(trades_df.index, pd.DatetimeIndex):
-            return trades_df.index
-        raise ValueError("Cannot determine entry times – provide 't0' column or DatetimeIndex.")
+    def _entry_bar_ids(trades_df: pd.DataFrame) -> pd.Index:
+        if "UniqueBarID" in trades_df.columns:
+            return pd.Index(trades_df["UniqueBarID"].values)
+        raise ValueError("Cannot determine entry bar IDs – provide 'UniqueBarID' column.")
 
     @staticmethod
     def _missing_columns(df: pd.DataFrame, expected: Sequence[str]) -> List[str]:

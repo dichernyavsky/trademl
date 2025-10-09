@@ -23,7 +23,7 @@ class DataLoader:
             normalize_columns (bool): Whether to normalize column names to standard format.
             
         Returns:
-            pandas.DataFrame: DataFrame with OHLCV data.
+            pandas.DataFrame: DataFrame with OHLCV data and UniqueBarID as index.
         """
         df = pd.read_csv(file_path)
         
@@ -40,20 +40,20 @@ class DataLoader:
                     break
         
         if date_column is not None and date_column in df.columns:
-            # Try to convert to datetime using different formats if needed
+            # Convert to datetime and save as OpenTime column
             try:
-                df[date_column] = pd.to_datetime(df[date_column])
+                df['OpenTime'] = pd.to_datetime(df[date_column])
             except:
                 # If simple conversion fails, try some common formats
                 for fmt in ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y']:
                     try:
-                        df[date_column] = pd.to_datetime(df[date_column], format=fmt)
+                        df['OpenTime'] = pd.to_datetime(df[date_column], format=fmt)
                         break
                     except:
                         continue
             
-            # Set the date column as index
-            df.set_index(date_column, inplace=True)
+            # Remove the original date column
+            df = df.drop(columns=[date_column])
         
         # Ensure required columns exist in standard format
         required_columns = ['Open', 'High', 'Low', 'Close']
@@ -61,6 +61,10 @@ class DataLoader:
         
         if missing_columns:
             raise ValueError(f"Missing required columns after normalization: {missing_columns}")
+        
+        # Set UniqueBarID as index
+        df.index = range(1, len(df) + 1)
+        df.index.name = 'UniqueBarID'
         
         return df
     
@@ -154,7 +158,7 @@ class DataLoader:
             normalize_columns_names (bool): Whether to normalize column names to standard format.
             
         Returns:
-            pandas.DataFrame: DataFrame with OHLCV data.
+            pandas.DataFrame: DataFrame with OHLCV data and UniqueBarID as index.
         """
         df = pd.read_parquet(file_path)
         
@@ -168,6 +172,14 @@ class DataLoader:
         
         if missing_columns:
             raise ValueError(f"Missing required columns after normalization: {missing_columns}")
+        
+        # Save OpenTime if index is datetime and OpenTime column doesn't exist
+        if 'OpenTime' not in df.columns and isinstance(df.index, pd.DatetimeIndex):
+            df['OpenTime'] = df.index
+        
+        # Set UniqueBarID as index
+        df.index = range(1, len(df) + 1)
+        df.index.name = 'UniqueBarID'
         
         return df
     

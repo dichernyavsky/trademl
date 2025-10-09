@@ -143,8 +143,9 @@ def plot_market_data(
     BAR_WIDTH = .8
     NBSP = '\N{NBSP}' * 4
     
-    # Check if we have a datetime index
+    # Check if we have a datetime index or OpenTime column
     is_datetime_index = isinstance(df.index, pd.DatetimeIndex)
+    has_open_time = 'OpenTime' in df.columns
     
     # Ensure we have the required columns
     required_cols = ['Open', 'High', 'Low', 'Close']
@@ -158,6 +159,11 @@ def plot_market_data(
     df = df.copy()
     if is_datetime_index:
         df['datetime'] = df.index  # Save original datetime index
+    elif has_open_time:
+        df['datetime'] = df['OpenTime']  # Use OpenTime column for datetime
+    else:
+        # If no datetime info, use index as x-axis
+        df['datetime'] = df.index
     
     df = df.reset_index(drop=True)
     index = df.index
@@ -196,8 +202,8 @@ def plot_market_data(
     # Create color maps
     inc_cmap = factor_cmap('inc', COLORS, ['0', '1'])
     
-    # Set datetime formatter if we have datetime index
-    if is_datetime_index:
+    # Set datetime formatter if we have datetime data
+    if is_datetime_index or has_open_time:
         fig_ohlc.xaxis.formatter = CustomJSTickFormatter(
             args=dict(
                 axis=fig_ohlc.xaxis[0],

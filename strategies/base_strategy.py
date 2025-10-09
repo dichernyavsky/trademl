@@ -125,41 +125,21 @@ class BaseStrategy:
             return events
             
         elif isinstance(enriched_data, dict):
-            # Check if this is the legacy format with intervals
-            if any(isinstance(v, dict) for v in enriched_data.values()):
-                # Legacy format: {interval: {symbol: df}}
-                events_dict = {}
-                for interval, symbols_data in enriched_data.items():
-                    events_dict[interval] = {}
-                    for symbol, symbol_data in symbols_data.items():
-                        events = self._generate_raw_events(symbol_data)
-                        
-                        if len(events) == 0:
-                            events_dict[interval][symbol] = events
-                            continue
-                        
-                        events_dict[interval][symbol] = events
+            # Simplified format: {symbol: df}
+            events_dict = {}
+            for symbol, symbol_data in enriched_data.items():
+                events = self._generate_raw_events(symbol_data)
                 
-                if set_barriers:
-                    events_dict = self.set_barriers(events_dict, enriched_data)
-                    
-                return events_dict
-            else:
-                # Simplified format: {symbol: df}
-                events_dict = {}
-                for symbol, symbol_data in enriched_data.items():
-                    events = self._generate_raw_events(symbol_data)
-                    
-                    if len(events) == 0:
-                        events_dict[symbol] = events
-                        continue
-                    
+                if len(events) == 0:
                     events_dict[symbol] = events
+                    continue
                 
-                if set_barriers:
-                    events_dict = self.set_barriers(events_dict, enriched_data)
-                    
-                return events_dict
+                events_dict[symbol] = events
+            
+            if set_barriers:
+                events_dict = self.set_barriers(events_dict, enriched_data)
+                
+            return events_dict
         else:
             raise ValueError("Data must be DataFrame or dict of DataFrames")
     
