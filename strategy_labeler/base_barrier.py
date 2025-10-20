@@ -55,22 +55,29 @@ class Barrier:
 
         Behavior:
         - t1 = min(event_pos + hold_periods, last_index)
-        - Uses searchsorted for consistent positioning with generate_trades
+        - Uses UniqueBarID for precise synchronization
         """
         hold_periods = kwargs.get('hold_periods', self.hold_periods)
 
         result = events.copy()
-        close_idx = data['Close'].index
-        idx_vals = close_idx.values
-        n = len(idx_vals)
+        close_idx = data['Close'].index  # This is UniqueBarID index
+        n = len(close_idx)
 
-        ev_vals = result.index.values
-        # Use searchsorted like in generate_trades: first bar with time >= event_time
-        pos = np.searchsorted(idx_vals, ev_vals, side='left')
-        pos = np.clip(pos, 0, n - 1)
+        # Use UniqueBarID for precise synchronization
+        if 'UniqueBarID' in events.columns:
+            # Events have UniqueBarID column - use it for exact matching
+            event_bar_ids = events['UniqueBarID'].values
+            pos = close_idx.get_indexer(event_bar_ids)  # Should always find exact matches
+            pos = np.where(pos == -1, n - 1, pos)  # Fallback to last bar if not found
+        else:
+            # Fallback to index-based approach (for backward compatibility)
+            ev_vals = result.index.values
+            pos = np.searchsorted(close_idx.values, ev_vals, side='left')
+            pos = np.clip(pos, 0, n - 1)
+        
         target_pos = np.minimum(pos + int(hold_periods), n - 1)
 
-        # Assign t1 times
+        # Assign t1 as UniqueBarID (not time)
         result['t1'] = close_idx.values[target_pos]
         return result
     
@@ -167,14 +174,23 @@ class Barrier:
 
         # Vectorized mapping:
         # window [start_pos, end_pos], inclusive.
-        # start_pos := first bar with time >= event_time
-        # end_pos   := last bar with time <= t1  (assumes t1 ∈ index in your pipeline)
-        ev_times = out.index.values
-        t1_times = out['t1'].values
+        # Use UniqueBarID for precise synchronization
+        if 'UniqueBarID' in out.columns:
+            # Use UniqueBarID for exact matching
+            event_bar_ids = out['UniqueBarID'].values
+            t1_bar_ids = out['t1'].values  # t1 is now also UniqueBarID
+            
+            # Direct position mapping using UniqueBarID
+            start_pos = pd.Index(close.index).get_indexer(event_bar_ids)
+            end_pos_r = pd.Index(close.index).get_indexer(t1_bar_ids)
+        else:
+            # Fallback to time-based approach
+            ev_times = out.index.values
+            t1_times = out['t1'].values
 
-        # searchsorted on numpy datetime64
-        start_pos = np.searchsorted(idx, ev_times, side='left')
-        end_pos_r = np.searchsorted(idx, t1_times, side='right') - 1
+            # searchsorted on numpy datetime64
+            start_pos = np.searchsorted(idx, ev_times, side='left')
+            end_pos_r = np.searchsorted(idx, t1_times, side='right') - 1
 
         # Clip invalid positions
         start_pos = np.where(start_pos < 0, 0, start_pos)
@@ -194,11 +210,19 @@ class Barrier:
         need_fill = out['entry_price'].isna().to_numpy()
         if need_fill.any():
             if entry_price_mode == 'exact':
-                # Original behavior: only fill if event timestamp exactly matches price index
-                exact_pos = pd.Index(close.index).get_indexer(out.index)  # -1 if not exact
-                mask_exact = (exact_pos >= 0) & need_fill
-                if mask_exact.any():
-                    out.loc[mask_exact, 'entry_price'] = close.iloc[exact_pos[mask_exact]].to_numpy()
+                # Use UniqueBarID for exact matching if available
+                if 'UniqueBarID' in out.columns:
+                    event_bar_ids = out.loc[need_fill, 'UniqueBarID'].values
+                    exact_pos = pd.Index(close.index).get_indexer(event_bar_ids)  # Should always find exact matches
+                    mask_exact = (exact_pos >= 0) & need_fill
+                    if mask_exact.any():
+                        out.loc[mask_exact, 'entry_price'] = close.iloc[exact_pos[mask_exact]].to_numpy()
+                else:
+                    # Fallback: only fill if event timestamp exactly matches price index
+                    exact_pos = pd.Index(close.index).get_indexer(out.index)  # -1 if not exact
+                    mask_exact = (exact_pos >= 0) & need_fill
+                    if mask_exact.any():
+                        out.loc[mask_exact, 'entry_price'] = close.iloc[exact_pos[mask_exact]].to_numpy()
             else:
                 # New behavior: use price at the actual execution bar (start_pos)
                 sp = np.clip(start_pos[need_fill], 0, n-1)

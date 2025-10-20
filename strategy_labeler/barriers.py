@@ -89,7 +89,20 @@ class SimpleVolatilityBarrier(Barrier):
         )
 
         # Get volatility at event times (index-align w/ events)
-        event_vol = vol.reindex(events.index)
+        # Use UniqueBarID for precise synchronization if available
+        if 'UniqueBarID' in events.columns:
+            # Use UniqueBarID for exact matching - should always find exact matches
+            event_vol = vol.reindex(events['UniqueBarID'])
+            # With UniqueBarID, we should not get NaN values, but add safety check
+            if event_vol.isna().any():
+                # This should not happen with UniqueBarID, but add fallback
+                event_vol = vol.reindex(events['UniqueBarID'], method='ffill').fillna(method='bfill')
+        else:
+            # Fallback to time-based approach
+            event_vol = vol.reindex(events.index)
+            if event_vol.isna().any():
+                # Use forward fill to avoid NaN values that cause time exits
+                event_vol = vol.reindex(events.index, method='ffill').fillna(method='bfill')
 
         # Calculate target sizes (maximum of volatility-based and minimum threshold)
         pt_target = np.maximum(m_pt * event_vol.values, min_ret)

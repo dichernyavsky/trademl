@@ -91,3 +91,6 @@ logs/
 tmp/
 temp/
 data/
+
+# Experimental files
+BayesBadTree.py

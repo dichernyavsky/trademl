@@ -232,6 +232,10 @@ def plot_market_data(
     if plot_volume:
         ohlc_tooltips.append(('Volume', '@Volume{0,0}'))
     
+    # Add Duration to tooltips if present in the DataFrame
+    if 'Duration' in df.columns:
+        ohlc_tooltips.append(('Duration', '@Duration{0,0.0[0000]}'))
+    
     # Helper function to create indicator figures
     def new_indicator_figure(**kwargs):
         kwargs.setdefault('height', 150)
